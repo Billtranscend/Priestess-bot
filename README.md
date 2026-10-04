@@ -104,7 +104,7 @@ NapCat 以反向 WebSocket 客户端连入。动态推送可另外搭配
 2. 获取代码并安装 Python 依赖
 
    ```bash
-   git clone https://github.com/HelinWang0721/Priestess-bot.git /opt/priestess-bot
+   git clone https://github.com/Billtranscend/Priestess-bot.git /opt/priestess-bot
    cd /opt/priestess-bot
    python3.12 -m venv .venv
    .venv/bin/pip install -r requirements.txt
