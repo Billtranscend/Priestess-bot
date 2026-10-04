@@ -1,7 +1,9 @@
 {#- Restyled from ef_gacha_macros.html.jinja2 of nonebot-plugin-skland 0.7.1 (https://github.com/FrostN0v0/nonebot-plugin-skland), MIT License, Copyright (c) 2025 FrostN0v0. See THIRD_PARTY_NOTICES.md. -#}
 {# 终末地单卡池渲染宏 #}
-{% macro ef_pool_card(pool, pool_label, pool_color, gacha_data=none) %}
-{% set stats = namespace(pity_count=0, five_stars=[]) %}
+{% macro ef_pool_card(pool, pool_label, pool_color, gacha_data=none, gifts=none) %}
+{% set stats = namespace(pity_count=0, five_stars=[], paid=0) %}
+{# 累计抽数赠送（信物 / 武库箱 / UP 武器等）：{第 N 个付费抽: [赠品]}，由 skland_ef_theme 注入 #}
+{% set pool_gifts = (gifts or {}).get(pool.pool_id, {}) %}
 {% set show_spook = pool.show_spook_stats %}
 
 <div class="pool">
@@ -26,9 +28,15 @@
             </div>
             {% endif %}
         </div>
-        <div class="pc">
-            <b>{{ pool.total_pulls }}</b>
-            <small>抽</small>
+        {# 抽数不含免费十连；免费十连单独标出 #}
+        <div class="pcs">
+            <div class="pc">
+                <b>{{ pool.paid_pulls }}</b>
+                <small>抽</small>
+            </div>
+            {% if pool.free_pulls %}
+            <div class="pf">另 免费{{ pool.free_pulls }}抽</div>
+            {% endif %}
         </div>
     </div>
 
@@ -64,7 +72,7 @@
         <div class="rec free{% if multi_free_six %} multi{% endif %}">
             {% if free_six_idx.value == free_sixes | length %}
             <div class="grp free">
-                <span>免费10连{% if multi_free_six %} · {{ free_sixes | length }}金{% endif %}</span>
+                <span>免费十连{% if multi_free_six %} · {{ free_sixes | length }}金{% endif %}</span>
             </div>
             {% endif %}
 
@@ -85,10 +93,10 @@
                         {% if pool.up_six_chars and pull.item_id in pool.up_six_chars %}
                         <span class="t up">UP</span>
                         {% endif %}
-                        <span class="t free">FREE</span>
+                        <span class="t free">免费十连</span>
                     </div>
                     <div class="free-bar">
-                        <span>不计入保底</span>
+                        <span>不计入抽数与保底</span>
                     </div>
                     {# 免费十连中出的5星 #}
                     {% if free_six_idx.value == 1 and free_fives %}
@@ -112,16 +120,16 @@
         <div class="rec free">
             <div class="rr">
                 <div class="ra">
-                    <div class="av box">FREE</div>
+                    <div class="av box">免费</div>
                     <span class="date">{{ record.gacha_ts | format_timestamp_md }}</span>
                 </div>
                 <div class="rb">
                     <div class="rn">
-                        <b>免费10连</b>
-                        <span class="t free">FREE</span>
+                        <b>免费十连</b>
+                        <span class="t free">免费</span>
                     </div>
                     <div class="free-bar">
-                        <span>未出6★</span>
+                        <span>未出6★ · 不计入抽数与保底</span>
                     </div>
                     {# 免费十连中出的5星 #}
                     {% if free_fives %}
@@ -150,6 +158,7 @@
 
         {% for pull in paid_pulls_in_group | reverse %}
         {% set stats.pity_count = stats.pity_count + 1 %}
+        {% set stats.paid = stats.paid + 1 %}
 
         {% if pull.rarity == 5 %}
         {% set stats.five_stars = stats.five_stars + [pull] %}
@@ -222,6 +231,31 @@
         {% set stats.pity_count = 0 %}
         {% set stats.five_stars = [] %}
         {% endif %}
+
+        {# ── 这一抽触发的累计赠送（不是抽出来的，不占抽数） ── #}
+        {% for gift in pool_gifts.get(stats.paid, []) %}
+        <div class="rec gift">
+            <div class="rr">
+                <div class="ra">
+                    {% if gift.icon %}
+                    <img src="{{ gift.icon | ef_charId_to_avatarUrl }}" class="av" />
+                    {% else %}
+                    <div class="av box">赠</div>
+                    {% endif %}
+                    <span class="date">{{ record.gacha_ts | format_timestamp_md }}</span>
+                </div>
+                <div class="rb">
+                    <div class="rn">
+                        <b>{{ gift.name }}</b>
+                        <span class="t gift">赠送</span>
+                    </div>
+                    <div class="gift-bar">
+                        <span>满{{ gift.at }}抽赠送 · 非抽取</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
         {% endfor %}
         {% endif %}
 
@@ -232,7 +266,7 @@
 
 
 {# 卡池分类列渲染 #}
-{% macro ef_pool_column(pools, category_label, category_color, gacha_data=none, visible_pool_ids=none) %}
+{% macro ef_pool_column(pools, category_label, category_color, gacha_data=none, visible_pool_ids=none, gifts=none) %}
 {% if visible_pool_ids is not none %}
 {% set filtered_pools = pools | selectattr('pool_id', 'in', visible_pool_ids) | list %}
 {% else %}
@@ -242,10 +276,10 @@
 <div class="col">
     <div class="ef-sec">
         {# 分类标题 #}
-        <h3>{{ category_label }}<small>{{ filtered_pools | sum(attribute='total_pulls') }}<i>抽</i></small></h3>
+        <h3>{{ category_label }}<small>{{ filtered_pools | sum(attribute='paid_pulls') }}<i>抽</i>{% if filtered_pools | sum(attribute='free_pulls') %}<em>另 免费{{ filtered_pools | sum(attribute='free_pulls') }}</em>{% endif %}</small></h3>
         <div class="pools">
             {% for pool in filtered_pools %}
-            {{ ef_pool_card(pool, category_label, category_color, gacha_data=gacha_data) }}
+            {{ ef_pool_card(pool, category_label, category_color, gacha_data=gacha_data, gifts=gifts) }}
             {% endfor %}
         </div>
     </div>

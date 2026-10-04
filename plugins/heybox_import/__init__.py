@@ -13,6 +13,11 @@ turned into rows and which checks protect the data:
   - official rows are never changed; a pool is only extended backwards, and only when both
     sources agree where they overlap;
   - imported rows have a negative `pos`, so they are identifiable and removable.
+
+The import is a function of (Heybox answer, official rows). Official rows can also arrive after
+an import: the first sync of a new binding, or pulls the nightly sync had not fetched yet. The
+pulls they cover must then leave the import or they would be counted twice, so the Heybox answer
+is kept and the import is rebuilt from it (`reconcile`) whenever official rows are added.
 """
 
 from __future__ import annotations
@@ -42,16 +47,19 @@ require("nonebot_plugin_localstore")
 require("nonebot_plugin_orm")
 require("nonebot_plugin_skland")
 require("nonebot_plugin_user")
+require("plugins.skland_auto_gacha")
 
 import nonebot_plugin_localstore as store
 from nonebot_plugin_alconna import UniMessage, message_reaction
 from nonebot_plugin_htmlrender import get_new_page
-from nonebot_plugin_orm import async_scoped_session
+from nonebot_plugin_orm import async_scoped_session, get_session
 from nonebot_plugin_skland.db_handler import get_default_endfield_character
 from nonebot_plugin_skland.data_source import ef_gacha_pool_data
 from nonebot_plugin_skland.model import GachaRecord, SkUser
 from nonebot_plugin_user import UserSession
-from sqlalchemy import delete, func, insert, select
+from sqlalchemy import delete, event, func, insert, select
+
+from plugins import skland_auto_gacha as auto_gacha
 
 from .plan import Official, Plan, build_plan
 
@@ -69,6 +77,8 @@ DATA_DIR = store.get_plugin_data_dir()
 COOLDOWN = 300
 FETCH_TIMEOUT = 15000  # ms per attempt
 FETCH_ATTEMPTS = 3
+RECONCILE_DELAY = 10  # s after an official row is flushed; its transaction has to commit first
+RECONCILE_ATTEMPTS = 3
 CN = timezone(timedelta(hours=8))
 REACTION_PROCESSING, REACTION_DONE, REACTION_FAIL = "66", "144", "10060"
 
@@ -177,8 +187,22 @@ def _pool_name(pool_id: str, fallback: str, known: dict[str, str]) -> str:
     return (local.pool_name if local and local.pool_name else fallback) or pool_id
 
 
-async def run_import(session, user, character, result: dict) -> Plan:
-    """Replace this role's earlier import with a fresh one built from `result`; commits on success."""
+def _pool_windows() -> dict[str, tuple[int, int]]:
+    """Pool id -> (open, close) in unix seconds, from the wiki index's calendar; empty when unavailable."""
+    windows: dict[str, tuple[int, int]] = {}
+    with contextlib.suppress(Exception):
+        from plugins import endfield_wiki
+
+        loaded = endfield_wiki._resolver()
+        for pool in ((loaded[0] if loaded else {}).get("calendar") or {}).get("pools") or []:
+            with contextlib.suppress(KeyError, ValueError):
+                opened, closed = (datetime.strptime(pool[key], "%Y/%m/%d %H:%M:%S").replace(tzinfo=CN) for key in ("open", "close"))
+                windows[pool["id"]] = (int(opened.timestamp()), int(closed.timestamp()))
+    return windows
+
+
+async def _build(session, user, character, result: dict) -> tuple[Plan, list[dict]]:
+    """The plan for this role and the database rows it stands for."""
     official = [
         Official(pool_id, name, rarity, int(ts), pos, bool(is_free))
         for pool_id, name, rarity, ts, pos, is_free in await session.execute(
@@ -186,9 +210,9 @@ async def run_import(session, user, character, result: dict) -> Plan:
             .where(GachaRecord.uid == user.id, GachaRecord.char_uid == character.uid, GachaRecord.app_code == "endfield", GachaRecord.pos >= 0)
         )
     ]
-    plan = build_plan(result, str(character.role_id), official)
+    plan = build_plan(result, str(character.role_id), official, _pool_windows())
     if plan.error or not plan.rows:
-        return plan
+        return plan, []
     ids, pool_names = await _known_names(session)
     rows = [
         {
@@ -200,10 +224,21 @@ async def run_import(session, user, character, result: dict) -> Plan:
         }
         for row in plan.rows
     ]
-    await session.execute(delete(GachaRecord).where(*_imported(user.id, character.uid)))
+    return plan, rows
+
+
+async def _replace(session, user_id: int, char_uid: str, rows: list[dict]) -> None:
+    await session.execute(delete(GachaRecord).where(*_imported(user_id, char_uid)))
     for start in range(0, len(rows), 500):
         await session.execute(insert(GachaRecord), rows[start : start + 500])
-    await session.commit()
+
+
+async def run_import(session, user, character, result: dict) -> Plan:
+    """Replace this role's earlier import with a fresh one built from `result`; commits on success."""
+    plan, rows = await _build(session, user, character, result)
+    if rows:
+        await _replace(session, user.id, character.uid, rows)
+        await session.commit()
     return plan
 
 
@@ -215,6 +250,86 @@ def _keep_raw(user_id: int, heybox_id: str, result: dict) -> None:
     tmp.write_text(json.dumps({"heybox_id": heybox_id, "fetched": time.time(), "result": result}, ensure_ascii=False), "utf-8")
     tmp.chmod(0o600)
     tmp.replace(path)
+
+
+def _snapshot(user_id: int) -> dict | None:
+    with contextlib.suppress(OSError, ValueError):
+        return json.loads((DATA_DIR / f"{user_id}.json").read_text("utf-8"))
+    return None
+
+
+async def reconcile(user_id: int) -> str:
+    """Rebuild one account's import from the Heybox answer kept at import time.
+
+    Nothing happens for an account that never imported or undid its import. A pool the plan no
+    longer accepts loses its imported rows: official rows are the truth where the two overlap.
+    """
+    snapshot = await asyncio.to_thread(_snapshot, user_id)
+    if not snapshot or not isinstance(snapshot.get("result"), dict):
+        return "no snapshot"
+    async with _lock, get_session() as session:
+        user = await session.get(SkUser, user_id)
+        character = await get_default_endfield_character(user, session) if user else None
+        if character is None or not character.role_id:
+            return "no role"
+        key = (GachaRecord.pool_id, GachaRecord.gacha_ts, GachaRecord.pos, GachaRecord.char_name, GachaRecord.is_free)
+        before = sorted(tuple(row) for row in await session.execute(select(*key).where(*_imported(user_id, character.uid))))
+        if not before:
+            return "nothing imported"
+        plan, rows = await _build(session, user, character, snapshot["result"])
+        if plan.error:
+            return "snapshot rejected"
+        after = sorted((row["pool_id"], row["gacha_ts"], row["pos"], row["char_name"], row["is_free"]) for row in rows)
+        if after == before:
+            return "unchanged"
+        await _replace(session, user_id, character.uid, rows)
+        await session.commit()
+    return f"{len(before)} -> {len(after)} rows"
+
+
+_due: set[int] = set()
+_reconciling: set[asyncio.Task] = set()
+
+
+async def _reconcile_later(user_id: int, delay: float) -> None:
+    await asyncio.sleep(delay)
+    _due.discard(user_id)
+    for attempt in range(RECONCILE_ATTEMPTS):
+        try:
+            outcome = await reconcile(user_id)
+        except Exception as e:  # e.g. the database is busy with the sync that triggered this
+            logger.warning(f"Heybox reconcile attempt {attempt + 1} failed: {type(e).__name__}")
+            await asyncio.sleep(RECONCILE_DELAY)
+            continue
+        if outcome not in ("no snapshot", "nothing imported", "unchanged"):
+            logger.info(f"Heybox import reconciled after new official rows: {outcome}")
+        return
+
+
+def _schedule_reconcile(user_id: int, delay: float = RECONCILE_DELAY) -> None:
+    if user_id in _due:
+        return
+    _due.add(user_id)
+    task = asyncio.get_running_loop().create_task(_reconcile_later(user_id, delay))
+    _reconciling.add(task)
+    task.add_done_callback(_reconciling.discard)
+
+
+@event.listens_for(GachaRecord, "after_insert")
+def _official_row_added(mapper, connection, target) -> None:
+    """/zmd抽卡记录更新 saves its new rows through the ORM; the nightly sync is covered by the listener below."""
+    if target.app_code == "endfield" and (target.pos or 0) >= 0 and target.uid not in _due:
+        with contextlib.suppress(Exception):
+            _schedule_reconcile(target.uid)
+
+
+async def _after_official_sync(user_id: int, status: str, records: int, final: bool) -> None:
+    if status == "success" and records:
+        _schedule_reconcile(user_id, 1)
+
+
+if _after_official_sync not in auto_gacha.sync_listeners:
+    auto_gacha.sync_listeners.append(_after_official_sync)
 
 
 def summary(plan: Plan) -> str:

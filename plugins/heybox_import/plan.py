@@ -13,6 +13,10 @@ Rebuilt rows get a negative `pos` (official seqIds are positive), so they can ne
 official rows and can be told apart or removed at any time. Official rows are never modified:
 a pool is only extended backwards, and only when the overlap between the two sources agrees.
 
+Heybox also reports the last official seqId it has seen per pool type. Official rows newer than
+that are pulls made after its snapshot: they are left out of the comparison, so the same snapshot
+gives the same answer whenever the plan is rebuilt (see `reconcile` in __init__.py).
+
 Pure functions: no I/O, no database.
 """
 
@@ -25,6 +29,12 @@ PLACEHOLDER_NAME = "小黑盒导入"
 PLACEHOLDER_RARITY = 4
 SUPPORTED_PREFIXES = ("special", "joint", "wepon", "weapon")  # plus the exact ids below
 SUPPORTED_IDS = ("standard", "beginner")
+SEQ_KEYS = (  # pool id prefix -> key in Heybox's gacha_type_latest_seq_id (weapon pools share "weapon")
+    ("special", "E_CharacterGachaPoolType_Special"),
+    ("joint", "E_CharacterGachaPoolType_Joint"),
+    ("standard", "E_CharacterGachaPoolType_Standard"),
+    ("beginner", "E_CharacterGachaPoolType_Beginner"),
+)
 
 
 @dataclass
@@ -134,7 +144,30 @@ def _free_segment(entry: dict) -> list[dict]:
     return events
 
 
-def _pool_events(pool: dict, official: list[Official], weapon: bool) -> tuple[list[dict], str]:
+def _opening(pool: dict, window: tuple[int, int] | None, account_start: int) -> int:
+    """When the pool opened (unix seconds), or 0 when nobody knows.
+
+    Heybox's own start_time is usually 0 and sometimes swapped with the end time, so it is only
+    trusted inside the window the game tables give; otherwise the window's opening is used.
+    Permanent pools have no window: the time Heybox counts the account from stands in.
+    """
+    start = int((pool.get("pool_info") or {}).get("start_time") or 0)
+    start = start // 1000 if start > 10**11 else start
+    if window:
+        return start if window[0] <= start < window[1] else window[0]
+    return start if start > 0 else account_start
+
+
+def _snapshot_seq(result: dict, pool_id: str, weapon: bool) -> int | None:
+    """The newest official seqId Heybox had for this pool's type, if it says so."""
+    key = "weapon" if weapon else next((key for prefix, key in SEQ_KEYS if pool_id.lower().startswith(prefix)), "")
+    value = (result.get("gacha_type_latest_seq_id") or {}).get(key)
+    return int(value) if value else None
+
+
+def _pool_events(
+    pool: dict, official: list[Official], weapon: bool, window: tuple[int, int] | None = None, account_start: int = 0
+) -> tuple[list[dict], str]:
     """Pulls of one pool that predate our official rows, oldest first; or a reason to skip it."""
     entries = _six_stars(pool.get("records") or [])
     pity = int(pool.get("current_pity") or 0)
@@ -151,13 +184,10 @@ def _pool_events(pool: dict, official: list[Official], weapon: bool) -> tuple[li
         if prev is not None:
             _segment(events, None, pity, prev, weapon)
         elif pity:  # no 6-star at all: the pool's opening time is the only anchor
-            start = int((pool.get("pool_info") or {}).get("start_time") or 0)
+            start = _opening(pool, window, account_start)
             if start <= 0:
-                return [], "这个卡池没有出过六星，小黑盒也没有给出卡池时间，无法确定抽卡时间"
-            events += [
-                {"ts": ts, "name": PLACEHOLDER_NAME, "rarity": PLACEHOLDER_RARITY, "is_free": False}
-                for ts in _spread(pity, start // 1000 if start > 10**11 else start, None)
-            ]
+                return [], "这个卡池没有出过六星，也查不到卡池开放时间，无法确定抽卡时间"
+            events += [{"ts": ts, "name": PLACEHOLDER_NAME, "rarity": PLACEHOLDER_RARITY, "is_free": False} for ts in _spread(pity, start, None)]
     else:
         first_ts = paid[0].ts
         if not any(e["ts"] < first_ts for e in entries) and int(pool.get("total_count") or 0) <= len(paid):
@@ -199,8 +229,12 @@ def _pool_events(pool: dict, official: list[Official], weapon: bool) -> tuple[li
     return events, ""
 
 
-def build_plan(result: dict, uid: str, official: list[Official]) -> Plan:
-    """Rows to insert for the role `uid`, given Heybox's overview `result` and our official rows."""
+def build_plan(result: dict, uid: str, official: list[Official], pool_windows: dict[str, tuple[int, int]] | None = None) -> Plan:
+    """Rows to insert for the role `uid`, given Heybox's overview `result` and our official rows.
+
+    `pool_windows` maps pool id -> (open, close) in unix seconds, from the game tables; it places
+    the pulls of a pool the player never got a 6-star in.
+    """
     plan = Plan()
     if not result.get("is_bind") or not result.get("user_info"):
         plan.error = (
@@ -218,6 +252,7 @@ def build_plan(result: dict, uid: str, official: list[Official]) -> Plan:
     for row in official:
         by_pool.setdefault(row.pool_id, []).append(row)
 
+    account_start = int((result.get("statistic_info") or {}).get("count_time") or 0) // 1000
     staged: list[tuple[str, str, bool, list[dict]]] = []
     for category in result.get("gacha_record") or []:
         weapon = category.get("gacha_type") == "weapon"
@@ -232,7 +267,9 @@ def build_plan(result: dict, uid: str, official: list[Official]) -> Plan:
             if not (pool_id.lower().startswith(SUPPORTED_PREFIXES) or pool_id in SUPPORTED_IDS):
                 outcome.skipped = "暂不支持的卡池类型"
             else:
-                events, reason = _pool_events(pool, by_pool.get(pool_id, []), weapon)
+                seq = _snapshot_seq(result, pool_id, weapon)
+                known = [row for row in by_pool.get(pool_id, []) if seq is None or row.pos <= seq]
+                events, reason = _pool_events(pool, known, weapon, (pool_windows or {}).get(pool_id), account_start)
                 outcome.skipped = reason
                 if events:
                     outcome.pulls = len(events)

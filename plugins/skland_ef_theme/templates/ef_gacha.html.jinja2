@@ -89,6 +89,10 @@ img { display: block; }
 .stat h4:before { content: ""; width: 4px; height: 13px; background: var(--ef-yellow); box-shadow: 0 0 0 1px var(--ef-ink); }
 .stat .big { margin-top: 4px; font-family: var(--ef-num); font-weight: 700; font-size: 34px; line-height: 1.05; letter-spacing: .3px; }
 .stat .big small { font-family: var(--ef-cjk); font-size: 13px; font-weight: 400; color: var(--ef-sub); margin-left: 3px; }
+.stat .big em, .ef-sec > h3 small em { font-style: normal; font-family: var(--ef-cjk); font-size: 11px; font-weight: 400; letter-spacing: 0; color: var(--ef-sub); margin-left: 6px; padding: 0 4px; border: 1px dashed var(--ef-sub); vertical-align: middle; white-space: nowrap; }
+.note { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 14px; margin: 10px 0 0; padding: 6px 12px; border: 1px solid var(--ef-ink); border-left: 5px solid var(--ef-yellow); background: #fbfbf9; font-size: 12px; line-height: 17px; color: var(--ef-sub); }
+.note b { color: var(--ef-ink); font-weight: 900; }
+.note i.g { font-style: normal; font-weight: 900; font-size: 11px; padding: 0 5px; margin-right: 4px; background: var(--ef-ink); color: var(--ef-yellow); }
 .stat .kv { display: flex; gap: 8px; margin-top: 6px; }
 .stat .kv > div { flex: 1 1 0; }
 .stat .kv b { display: block; font-family: var(--ef-num); font-weight: 700; font-size: 20px; line-height: 1.1; white-space: nowrap; }
@@ -131,6 +135,8 @@ img { display: block; }
 .pool .pc { flex: none; display: flex; align-items: baseline; gap: 2px; padding: 1px 7px; background: var(--ef-yellow); color: var(--ef-ink); }
 .pool .pc b { font-family: var(--ef-num); font-weight: 700; font-size: 20px; line-height: 1.1; }
 .pool .pc small { font-size: 11px; }
+.pool .pcs { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.pool .pf { font-size: 10px; line-height: 13px; padding: 0 4px; border: 1px dashed #b9b9b2; color: #f4f4f0; white-space: nowrap; }
 .pool .ps { display: flex; border-bottom: 2px solid var(--ef-ink); background: var(--ef-panel); }
 .pool .ps > div { flex: 1 1 0; text-align: center; padding: 5px 4px 4px; }
 .pool .ps > div + div { border-left: 1px solid var(--ef-line-2); }
@@ -145,6 +151,9 @@ img { display: block; }
 .rec.multi { background: rgba(255,225,0,.16); }
 .rec.lead { border-left: 4px solid var(--ef-ink); padding-left: 6px; }
 .rec.free { border-left: 3px dashed var(--ef-sub); padding-left: 7px; }
+.rec.gift { border-left: 4px solid var(--ef-yellow); padding-left: 6px; background: rgba(255,225,0,.10); }
+.rec.gift .av { border-bottom-color: var(--ef-ink); }
+.rec.gift .av.box { background: var(--ef-yellow); color: var(--ef-ink); font-family: inherit; font-weight: 900; font-size: 17px; letter-spacing: 0; }
 .rec .grp { margin-bottom: 3px; }
 .rec .grp span { display: inline-block; font-size: 11px; font-weight: 700; line-height: 15px; padding: 0 6px; background: var(--ef-ink); color: var(--ef-yellow); }
 .rec .grp.free span { background: var(--ef-panel); color: var(--ef-ink); border: 1px dashed var(--ef-ink); line-height: 13px; }
@@ -152,7 +161,7 @@ img { display: block; }
 .ra { flex: none; width: 32px; display: flex; flex-direction: column; align-items: center; }
 .ra .av { width: 32px; height: 32px; object-fit: cover; background: var(--ef-panel-2); border: 1px solid var(--ef-ink); border-bottom: 3px solid var(--ef-yellow); }
 .ra .av.box { display: flex; align-items: center; justify-content: center; background: var(--ef-panel-2); border-bottom: 1px solid var(--ef-ink);
-  font-family: var(--ef-num); font-weight: 700; font-size: 11px; letter-spacing: .5px; color: var(--ef-sub); }
+  font-weight: 700; font-size: 11px; color: var(--ef-sub); }
 .ra .date { margin-top: 1px; font-family: var(--ef-num); font-weight: 600; font-size: 11px; line-height: 12px; color: var(--ef-sub); letter-spacing: .2px; }
 .rb { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .rn { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
@@ -161,7 +170,8 @@ img { display: block; }
 .t.up { background: var(--ef-yellow); font-family: var(--ef-num); font-weight: 700; font-size: 11px; }
 .t.spk { background: var(--ef-ink); color: #f4f4f0; }
 .t.new { font-family: var(--ef-num); font-weight: 700; font-size: 11px; }
-.t.free { border-style: dashed; font-family: var(--ef-num); font-weight: 700; font-size: 11px; }
+.t.free { border-style: dashed; font-weight: 700; }
+.t.gift { background: var(--ef-ink); color: var(--ef-yellow); font-weight: 900; font-size: 11px; padding: 0 5px; }
 .t.lucky { border-color: var(--ef-green); color: var(--ef-green); }
 .t.unlucky { border-color: var(--ef-red); color: var(--ef-red); }
 
@@ -174,6 +184,8 @@ img { display: block; }
 .red-stripe-bar span { color: var(--ef-yellow); }
 .free-bar { width: 100%; height: 17px; display: flex; align-items: center; border: 1px dashed var(--ef-sub); background: var(--ef-panel-2); }
 .free-bar span { font-size: 11px; font-weight: 700; padding: 0 6px; color: var(--ef-sub); white-space: nowrap; }
+.gift-bar { width: 100%; height: 17px; display: flex; align-items: center; border: 1px solid var(--ef-ink); background: repeating-linear-gradient(-45deg, rgba(255,225,0,.55) 0 5px, rgba(255,225,0,.22) 5px 10px); }
+.gift-bar span { font-size: 11px; font-weight: 700; padding: 0 6px; color: var(--ef-ink); white-space: nowrap; }
 
 .fives { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 1px; }
 .fives div { position: relative; }
@@ -193,10 +205,13 @@ img { display: block; }
         {# 账号信息横条 #}
         <div class="ef-head gh">
             <div class="code">
-                TOTAL<b>{{ record.total_pulls }}<small>抽</small></b>
+                {# 抽数一律不含免费十连，免费十连单列 #}
+                {% set free_total = record.all_pools | sum(attribute='free_pulls') %}
+                TOTAL<b>{{ record.total_pulls - free_total }}<small>抽</small></b>
                 <div class="split">
-                    <span>角色池<i>{{ record.char_total_pulls }}</i></span>
-                    <span>武器池<i>{{ record.weapon_total_pulls }}</i></span>
+                    <span>角色池<i>{{ record.char_pools | sum(attribute='paid_pulls') }}</i></span>
+                    <span>武器池<i>{{ record.weapon_pools | sum(attribute='paid_pulls') }}</i></span>
+                    {% if free_total %}<span>另 免费十连<i>{{ free_total }}</i></span>{% endif %}
                 </div>
             </div>
             <div class="k">Endfield · Headhunting Record</div>
@@ -209,12 +224,25 @@ img { display: block; }
             </div>
         </div>
 
+        {# 记录范围说明：官方接口不提供更早的抽数 #}
+        {% if ef_since %}
+        <div class="note">
+            <b>记录自 {{ ef_since }} 起</b>
+            {% if ef_imported %}
+            <span>含小黑盒导入 {{ ef_imported }} 抽（只记六星、五星与抽数）</span>
+            {% else %}
+            <span>官方接口不提供更早的记录，此前的抽数未计入，各池第一个六星的抽数可能偏少；发送 /zmd导入小黑盒 可补全</span>
+            {% endif %}
+            <span><i class="g">赠送</i>为满抽数自动赠送，不是抽出来的；免费十连不计入抽数与保底</span>
+        </div>
+        {% endif %}
+
         {# 统计卡片 - 均等宽度 #}
         <div class="stats">
                 {# 限定池统计 #}
                 <div class="stat">
                     <h4>限定池</h4>
-                    <div class="big">{{ record.special_total_pulls }}<small>抽</small></div>
+                    <div class="big">{{ record.special_pools | sum(attribute='paid_pulls') }}<small>抽</small>{% if record.special_pools | sum(attribute='free_pulls') %}<em>另 免费{{ record.special_pools | sum(attribute='free_pulls') }}</em>{% endif %}</div>
                     <div class="kv">
                         <div>
                             <b><span class="six">{{ record.special_total_six }}</span><i>/</i><span class="spook">{{ record.special_total_spook }}</span></b>
@@ -239,7 +267,7 @@ img { display: block; }
                 {# 武器池统计 #}
                 <div class="stat">
                     <h4>武器池</h4>
-                    <div class="big">{{ record.weapon_total_pulls }}<small>抽</small></div>
+                    <div class="big">{{ record.weapon_pools | sum(attribute='paid_pulls') }}<small>抽</small>{% if record.weapon_pools | sum(attribute='free_pulls') %}<em>另 免费{{ record.weapon_pools | sum(attribute='free_pulls') }}</em>{% endif %}</div>
                     <div class="kv">
                         <div>
                             <b><span class="six">{{ record.weapon_total_six }}</span><i>/</i><span class="spook">{{ record.weapon_total_spook }}</span></b>
@@ -264,7 +292,7 @@ img { display: block; }
                 {% if record.joint_pools %}
                 <div class="stat">
                     <h4>联合寻访</h4>
-                    <div class="big">{{ record.joint_total_pulls }}<small>抽</small></div>
+                    <div class="big">{{ record.joint_pools | sum(attribute='paid_pulls') }}<small>抽</small>{% if record.joint_pools | sum(attribute='free_pulls') %}<em>另 免费{{ record.joint_pools | sum(attribute='free_pulls') }}</em>{% endif %}</div>
                     <div class="kv">
                         <div>
                             <b><span class="six">{{ record.joint_total_six }}</span></b>
@@ -281,7 +309,7 @@ img { display: block; }
                 {# 常驻池统计 #}
                 <div class="stat">
                     <h4>常驻池</h4>
-                    <div class="big">{{ record.standard_total_pulls }}<small>抽</small></div>
+                    <div class="big">{{ record.standard_pools | sum(attribute='paid_pulls') }}<small>抽</small>{% if record.standard_pools | sum(attribute='free_pulls') %}<em>另 免费{{ record.standard_pools | sum(attribute='free_pulls') }}</em>{% endif %}</div>
                     <div class="kv">
                         <div>
                             <b><span class="six">{{ record.standard_total_six }}</span></b>
@@ -353,9 +381,9 @@ img { display: block; }
         {% endif %}
 
         <div class="cols">
-            {{ ef_pool_column(record.special_pools, "限定池", "#e17055", gacha_data=record, visible_pool_ids=visible_ids) }}
-            {{ ef_pool_column(record.weapon_pools, "武器池", "#fdcb6e", gacha_data=record, visible_pool_ids=visible_ids) }}
-            {{ ef_pool_column(record.joint_pools, "联合寻访", "#c084fc", gacha_data=record, visible_pool_ids=visible_ids) }}
+            {{ ef_pool_column(record.special_pools, "限定池", "#e17055", gacha_data=record, visible_pool_ids=visible_ids, gifts=ef_gifts) }}
+            {{ ef_pool_column(record.weapon_pools, "武器池", "#fdcb6e", gacha_data=record, visible_pool_ids=visible_ids, gifts=ef_gifts) }}
+            {{ ef_pool_column(record.joint_pools, "联合寻访", "#c084fc", gacha_data=record, visible_pool_ids=visible_ids, gifts=ef_gifts) }}
 
             {# 新手池 + 常驻池合并列 #}
             {% if visible_ids is not none %}
@@ -370,10 +398,10 @@ img { display: block; }
             <div class="col">
                 {% if vis_beginner %}
                 <div class="ef-sec">
-                    <h3>新手池<small>{{ vis_beginner | sum(attribute='total_pulls') }}<i>抽</i></small></h3>
+                    <h3>新手池<small>{{ vis_beginner | sum(attribute='paid_pulls') }}<i>抽</i></small></h3>
                     <div class="pools">
                         {% for pool in vis_beginner %}
-                        {{ ef_pool_card(pool, "新手池", "#74b9ff", gacha_data=record) }}
+                        {{ ef_pool_card(pool, "新手池", "#74b9ff", gacha_data=record, gifts=ef_gifts) }}
                         {% endfor %}
                     </div>
                 </div>
@@ -381,10 +409,10 @@ img { display: block; }
 
                 {% if vis_standard %}
                 <div class="ef-sec">
-                    <h3>常驻池<small>{{ vis_standard | sum(attribute='total_pulls') }}<i>抽</i></small></h3>
+                    <h3>常驻池<small>{{ vis_standard | sum(attribute='paid_pulls') }}<i>抽</i></small></h3>
                     <div class="pools">
                         {% for pool in vis_standard %}
-                        {{ ef_pool_card(pool, "常驻池", "#00b894", gacha_data=record) }}
+                        {{ ef_pool_card(pool, "常驻池", "#00b894", gacha_data=record, gifts=ef_gifts) }}
                         {% endfor %}
                     </div>
                 </div>

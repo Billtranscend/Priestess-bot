@@ -46,12 +46,15 @@ TABLES = (
     "ActivityTable",
     "GachaCharPoolTable",
     "GachaWeaponPoolTable",
+    "GachaCharPoolTypeTable",
+    "GachaWeaponPoolTypeTable",
+    "RewardTable",
     "BattlePassTaskTable",
     "BattlePassConditionTable",
     "ActivityWeeklyTaskTable",
     "ActivityWeeklyTaskMileStoneTable",
 )
-INDEX_SCHEMA = 8  # bump to force a rebuild when the index layout changes
+INDEX_SCHEMA = 9  # bump to force a rebuild when the index layout changes
 # Enemy resistance attribute ids (AttributeShowConfigTable), in the in-game display order.
 ENEMY_RESISTANCES = ((94, "物理"), (98, "灼热"), (97, "电磁"), (96, "寒冷"), (95, "自然"), (99, "超域"))
 TOWER_DIFFICULTIES = {"1": "普通", "2": "困难", "3": "残酷"}
@@ -530,7 +533,51 @@ def build_calendar(load, text) -> dict:
         span = window(time_id) if match else None
         if span:
             versions.append({"name": f"{match.group(1)}.{match.group(2)}", "open": span[0], "close": span[1]})
-    return {"activities": activities, "pools": pools, "passes": passes, "weekly": weekly, "versions": versions}
+    return {
+        "activities": activities, "pools": pools, "passes": passes, "weekly": weekly, "versions": versions,
+        "gifts": build_gacha_gifts(load, text),
+    }
+
+
+def build_gacha_gifts(load, text) -> dict:
+    """Pool id -> what the game hands out by itself at pull milestones in that pool (not pulled).
+
+    Each entry is {"at": pull count of the first one, "every": interval or 0 for a one-off,
+    "items": [{"name", "icon"}]}; a repeating gift cycles through its items (weapon pools: supply
+    case, UP weapon, case, ...). Counts are paid pulls in that pool; the free ten-pull is not counted.
+    `icon` is the operator / weapon id the gift stands for, when there is one.
+    """
+    rewards, items = load("RewardTable"), load("ItemTable")
+
+    def gift(reward_id: str) -> dict | None:
+        bundles = (rewards.get(reward_id) or {}).get("itemBundles") or []
+        item_id = bundles[0].get("id", "") if bundles else ""
+        name = text((items.get(item_id) or {}).get("name"))
+        if not name:
+            return None
+        count = bundles[0].get("count", 1)
+        icon = item_id if item_id.startswith("wpn_") else item_id.removeprefix("item_charpotentialup_") if item_id.startswith("item_charpotentialup_") else ""
+        return {"name": f"{name}×{count}" if count > 1 else name, "icon": icon}
+
+    def entry(at: int, every: int, reward_ids: list[str]) -> dict | None:
+        found = [g for g in map(gift, reward_ids) if g]
+        return {"at": at, "every": every, "items": found} if at > 0 and found and len(found) == len(reward_ids) else None
+
+    result: dict[str, list] = {}
+    for table, type_table in (("GachaCharPoolTable", "GachaCharPoolTypeTable"), ("GachaWeaponPoolTable", "GachaWeaponPoolTypeTable")):
+        types = load(type_table)
+        for pool_id, row in load(table).items():
+            rule = types.get(str(row.get("type"))) or {}
+            every = rule.get("intervalAutoRewardPerPullCount") or 0
+            entries = [
+                entry(rule.get("intervalAutoRewardStartPullCount", 0) + every, every, row.get("intervalAutoRewardIds") or []) if every else None,
+                entry(rule.get("onceRewardIdPullCount") or 0, 0, [row.get("onceRewardId") or ""]),
+                entry(rule.get("onceRewardId2PullCount") or 0, 0, [row.get("onceRewardId2") or ""]),
+                *(entry(at, 0, [reward_id]) for at, reward_id in zip(rule.get("cumulativeRewardsPullCount") or [], row.get("cumulativeRewardIds") or [])),
+            ]
+            if any(entries):
+                result[pool_id] = sorted((e for e in entries if e), key=lambda e: e["at"])
+    return result
 
 
 def char_icon_url(char_id: str) -> str:
