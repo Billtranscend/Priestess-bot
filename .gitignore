@@ -1,0 +1,17 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+
+# Secrets and runtime state: never commit these
+.env
+.env.*
+!.env.example
+napcat/
+data/
+cache/
+config/
+backups/
+
+# Render scratch files
+plugins/skl_help/.help.rendered.html

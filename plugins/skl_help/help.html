@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+/* shared Endfield theme: copy of plugins/ef_theme css() */
+/*EF_FONTS*/
+
+:root {
+  --ef-bg: #e3e3df; --ef-grid: rgba(20,20,20,.045);
+  --ef-panel: #f5f5f2; --ef-panel-2: #ebebe6; --ef-line: #cbcbc4; --ef-line-2: #deded8;
+  --ef-ink: #151515; --ef-sub: #66665f; --ef-faint: #96968e;
+  --ef-yellow: #ffe100; --ef-yellow-2: #f2d500; --ef-dark: #1b1c1e; --ef-dark-2: #2b2c2f;
+  --ef-red: #e0452b; --ef-green: #2a9358; --ef-blue: #2f6fbe;
+  --ef-cjk: "WenQuanYi Zen Hei", sans-serif;
+  --ef-num: "EF Num", "Liberation Sans Narrow", "WenQuanYi Zen Hei", sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body.ef { font-family: var(--ef-cjk); color: var(--ef-ink); background-color: var(--ef-bg);
+  background-image: linear-gradient(var(--ef-grid) 1px, transparent 1px), linear-gradient(90deg, var(--ef-grid) 1px, transparent 1px);
+  background-size: 24px 24px; }
+.ef-num { font-family: var(--ef-num); font-variant-numeric: tabular-nums; letter-spacing: .2px; }
+
+/* page header: dark plate, yellow spine, hazard strip */
+.ef-head { position: relative; background: var(--ef-dark); color: #f4f4f0; padding: 20px 26px 22px 34px; overflow: hidden; }
+.ef-head:before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 10px; background: var(--ef-yellow); }
+.ef-head:after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 7px;
+  background: repeating-linear-gradient(-45deg, var(--ef-yellow) 0 12px, var(--ef-dark) 12px 24px); }
+.ef-head .k { font-family: var(--ef-num); font-weight: 600; font-size: 15px; letter-spacing: 4px; color: var(--ef-yellow); text-transform: uppercase; }
+.ef-head h1 { font-size: 40px; font-weight: 900; margin-top: 6px; letter-spacing: 1px; }
+.ef-head h1 em { font-style: normal; color: var(--ef-yellow); }
+.ef-head p { margin-top: 6px; font-size: 17px; color: #b9b9b2; }
+.ef-head .code { position: absolute; right: 24px; top: 18px; text-align: right; font-family: var(--ef-num); font-weight: 600;
+  font-size: 14px; letter-spacing: 2px; color: #8d8d86; line-height: 1.5; }
+.ef-head .code b { display: block; font-size: 30px; color: #f4f4f0; letter-spacing: 1px; }
+
+/* section panel */
+.ef-sec { margin-top: 16px; background: var(--ef-panel); border: 1px solid var(--ef-line); }
+.ef-sec > h3 { display: flex; align-items: center; gap: 10px; padding: 10px 16px; font-size: 21px; font-weight: 900;
+  border-bottom: 2px solid var(--ef-ink); background: var(--ef-panel); }
+.ef-sec > h3:before { content: ""; width: 6px; height: 20px; background: var(--ef-yellow); box-shadow: 0 0 0 1px var(--ef-ink); }
+.ef-sec > h3 small { margin-left: auto; font-family: var(--ef-num); font-weight: 600; font-size: 14px; letter-spacing: 1px; color: var(--ef-sub); }
+.ef-sec > h3 small.cjk { font-family: var(--ef-cjk); font-weight: 400; letter-spacing: 0; }
+
+/* small parts */
+.ef-tag { display: inline-block; font-size: 13px; padding: 1px 8px; border: 1px solid var(--ef-ink); background: var(--ef-panel); }
+.ef-tag.y { background: var(--ef-yellow); } .ef-tag.d { background: var(--ef-ink); color: #f4f4f0; }
+.ef-rank { display: inline-block; width: 26px; height: 26px; line-height: 26px; text-align: center; font-family: var(--ef-num);
+  font-weight: 700; font-size: 17px; background: var(--ef-panel-2); border: 1px solid var(--ef-line); }
+.ef-rank.r1 { background: var(--ef-yellow); border-color: var(--ef-ink); }
+.ef-rank.r2, .ef-rank.r3 { background: var(--ef-ink); color: #f4f4f0; border-color: var(--ef-ink); }
+.ef-empty { padding: 14px 16px; color: var(--ef-faint); font-size: 16px; }
+.ef-foot { margin-top: 14px; display: flex; justify-content: space-between; align-items: center; gap: 16px; font-size: 13px; color: var(--ef-sub); line-height: 1.6; }
+.ef-foot .mark { font-family: var(--ef-num); font-weight: 600; letter-spacing: 3px; color: var(--ef-ink); white-space: nowrap; }
+.ef-foot .mark:before { content: ""; display: inline-block; width: 18px; height: 8px; margin-right: 8px; vertical-align: 1px;
+  background: repeating-linear-gradient(-45deg, var(--ef-yellow) 0 4px, var(--ef-ink) 4px 8px); }
+
+/* help page */
+body { width: 1080px; padding: 26px; }
+.ef-head h1 { font-size: 46px; }
+.ef-head .chips { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px; }
+.ef-head .chips span { font-size: 18px; padding: 3px 12px; border: 1px solid #55554f; color: #e6e6e0; background: var(--ef-dark-2); }
+.ef-head { padding-bottom: 26px; }
+
+.row { display: flex; gap: 16px; margin-top: 16px; align-items: stretch; }
+.row .ef-sec { flex: 1; margin-top: 0; }
+.ef-sec > h3 { font-size: 24px; }
+.ef-sec > h3 small.cjk { font-size: 17px; }
+.bd { padding: 12px 18px 14px; font-size: 20px; line-height: 1.65; }
+.bd .gap { margin-top: 6px; }
+.dim { color: var(--ef-sub); font-size: 17px; }
+.time { display: inline-block; margin-right: 4px; padding: 0 7px; line-height: 1.4; font-family: var(--ef-num); font-weight: 700; font-size: 21px;
+  letter-spacing: .5px; background: var(--ef-ink); color: var(--ef-yellow); }
+.warn { position: relative; }
+.warn:before { content: ""; display: block; height: 7px; background: repeating-linear-gradient(-45deg, var(--ef-yellow) 0 12px, var(--ef-ink) 12px 24px); }
+.red { font-weight: 900; color: var(--ef-ink); box-shadow: inset 0 -9px 0 var(--ef-yellow); }
+
+.alias { margin-top: 16px; padding: 12px 18px 12px 24px; font-size: 19px; line-height: 1.7; position: relative;
+  background: var(--ef-panel); border: 1px solid var(--ef-line); }
+.alias:before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 6px; background: var(--ef-yellow); }
+.alias b { font-weight: 700; padding: 0 5px; background: var(--ef-ink); color: #f4f4f0; }
+
+.sec.ark > h3:before { background: var(--ef-ink); box-shadow: none; }
+table { width: 100%; border-collapse: collapse; font-size: 20px; }
+td { padding: 9px 14px; border-top: 1px solid var(--ef-line-2); vertical-align: middle; line-height: 1.45; }
+tr:first-child td { border-top: 0; }
+tr:nth-child(even) td { background: rgba(20, 20, 20, .025); }
+td.cmd { width: 300px; }
+td.cmd code { display: inline-block; font-family: "WenQuanYi Zen Hei Mono", monospace; font-size: 20px; color: var(--ef-ink);
+  background: #fff; border: 1px solid var(--ef-ink); border-left-width: 4px; padding: 2px 10px; }
+td.fn { width: 330px; }
+td code { font-family: "WenQuanYi Zen Hei Mono", monospace; }
+td.fn code, td.note code { white-space: nowrap; padding: 0 5px; background: var(--ef-panel-2); border: 1px solid var(--ef-line); color: var(--ef-ink); }
+td.at { width: 84px; text-align: center; }
+td.note { color: var(--ef-sub); font-size: 18px; }
+.yes, .no { display: inline-block; min-width: 44px; padding: 1px 8px; font-size: 18px; font-weight: 700; border: 1px solid var(--ef-ink); }
+.yes { background: var(--ef-yellow); color: var(--ef-ink); }
+.no { background: #fff; color: var(--ef-sub); border-color: var(--ef-line); font-weight: 400; }
+.na { color: var(--ef-faint); font-size: 18px; }
+
+.ef-foot { margin-top: 18px; font-size: 18px; }
+.ef-foot b { color: var(--ef-ink); box-shadow: inset 0 -8px 0 var(--ef-yellow); }
+</style>
+</head>
+<body class="ef">
+  <div class="ef-head">
+    <div class="k">Priestess System · Skland Guide</div>
+    <h1>普瑞赛斯系统 · <em>森空岛功能指南</em></h1>
+    <div class="chips">
+      <span>绑定森空岛</span><span>终末地角色卡</span><span>抽卡记录</span><span>每日自动签到</span><span>欧非榜</span><span>理智提醒</span><span>资料库</span><span>高难攻略</span><span>竞速榜</span><span>肉鸽战绩</span>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="ef-sec auto">
+      <h3>自动任务（北京时间）</h3>
+      <div class="bd">
+      <div><span class="time">00:15</span> 明日方舟自动签到</div>
+      <div><span class="time">00:20</span> 终末地自动签到</div>
+      <div><span class="time">01:00</span> 终末地抽卡记录自动更新</div>
+      <div class="dim">新绑定账号后也会自动拉取一次抽卡记录</div>
+      <div><span class="time">05:30</span> 竞速榜、出场率、通关阵容数据更新</div>
+      <div><span class="time">17:30</span> 竞速榜、出场率、通关阵容数据更新</div>
+      <div class="dim">新打出的记录要等下一次更新后才会上榜；每关只记森空岛的最佳（最快）记录</div>
+      <div><span class="time">周日 19:00</span> 发送群周报（任务提醒、竞速榜、轮换、精华、活动与卡池）</div>
+      <div><span class="time">周一 04:00</span> 森空岛账号体检：登录失效、或全部角色都无法签到的绑定会被自动解除</div>
+      </div>
+    </div>
+    <div class="ef-sec warn">
+      <h3>安全提醒</h3>
+      <div class="bd">
+      <div>Token 凭据<span class="red">只在私聊中使用</span>，绝对不要发到群里。</div>
+      <div class="gap">绑定二维码可以在群里获取，但请只扫<span class="red">自己</span>发出的二维码。</div>
+      <div class="gap">所有指令都必须以 <span class="time">/</span> 开头。</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="alias">
+    指令前缀可互换：<b>zmd</b> = ef = 终末地　｜　<b>mrfz</b> = 方舟 = 明日方舟　｜　<b>skl</b> = skd = 森空岛<br>
+    例如 <b>/ef开盒</b> 和 <b>/zmd开盒</b> 效果相同，<b>/方舟签到</b> 和 <b>/mrfz签到</b> 效果相同
+  </div>
+
+  <div class="ef-sec sec acc">
+    <h3>账号绑定与管理</h3>
+    <table>
+      <tr><td class="cmd"><code>/skl绑定</code></td><td class="fn">扫二维码绑定（同 <code>/skl扫码</code>）</td><td class="at"><span class="no">否</span></td><td class="note">群聊、私聊均可</td></tr>
+      <tr><td class="cmd"><code>/skltoken绑定 凭据</code></td><td class="fn">用 Token 凭据绑定账号</td><td class="at"><span class="no">否</span></td><td class="note"><span class="red">只能私聊，切勿发到群里</span></td></tr>
+      <tr><td class="cmd"><code>/skl角色更新</code></td><td class="fn">刷新已绑定的游戏角色</td><td class="at"><span class="no">否</span></td><td class="note">新绑定或角色有变化时使用</td></tr>
+      <tr><td class="cmd"><code>/skl解绑</code></td><td class="fn">解绑自己的森空岛账号</td><td class="at"><span class="no">否</span></td><td class="note">会删除角色和抽卡记录，需回复「确认」</td></tr>
+    </table>
+  </div>
+
+  <div class="ef-sec sec ef">
+    <h3>终末地</h3>
+    <table>
+      <tr><td class="cmd"><code>/zmd开盒</code></td><td class="fn">查看终末地角色卡</td><td class="at"><span class="yes">是</span></td><td class="note">加 @用户 可查看群友</td></tr>
+      <tr><td class="cmd"><code>/zmd开盒 all</code></td><td class="fn">展示全部终末地角色</td><td class="at"><span class="yes">是</span></td><td class="note">all 要写在 @用户 前面</td></tr>
+      <tr><td class="cmd"><code>/zmd账号详情</code></td><td class="fn">全部干员的练度详情图</td><td class="at"><span class="yes">是</span></td><td class="note">含武器、技能等级和装备</td></tr>
+      <tr><td class="cmd"><code>/zmd签到</code></td><td class="fn">手动为自己的角色签到</td><td class="at"><span class="no">否</span></td><td class="note">每天 00:20 已自动签到</td></tr>
+      <tr><td class="cmd"><code>/zmd签到详情</code></td><td class="fn">查看自己的签到状态</td><td class="at"><span class="no">否</span></td><td class="note">只能查询自己</td></tr>
+      <tr><td class="cmd"><code>/zmd抽卡记录</code></td><td class="fn">查看已保存的抽卡记录</td><td class="at"><span class="no">否</span></td><td class="note">每天 01:00 自动更新</td></tr>
+      <tr><td class="cmd"><code>/zmd抽卡记录更新</code></td><td class="fn">立即拉取最新抽卡记录</td><td class="at"><span class="no">否</span></td><td class="note">想马上看到新记录时使用</td></tr>
+      <tr><td class="cmd"><code>/zmd欧非榜</code></td><td class="fn">本群终末地抽卡欧非排行</td><td class="at"><span class="no">否</span></td><td class="note">仅群聊；发 <code>/zmd欧非榜 退出</code> 可不上榜</td></tr>
+    </table>
+  </div>
+
+  <div class="ef-sec sec wiki">
+    <h3>终末地资料库<small class="cjk">数据来自 AKEData，有新版本时自动通知</small></h3>
+    <table>
+      <tr><td class="cmd"><code>/干员名</code></td><td class="fn">查看干员资料图</td><td class="at"><span class="na">—</span></td><td class="note">支持昵称：<code>/提丰</code> <code>/plk</code> <code>/小庄</code></td></tr>
+      <tr><td class="cmd"><code>/干员名专武</code></td><td class="fn">查看该干员专武资料图</td><td class="at"><span class="na">—</span></td><td class="note">例：<code>/提丰专武</code></td></tr>
+      <tr><td class="cmd"><code>/武器名</code></td><td class="fn">查看武器资料图</td><td class="at"><span class="na">—</span></td><td class="note">支持简称：<code>/寒夜幽影</code> <code>/寒夜</code></td></tr>
+    </table>
+  </div>
+
+  <div class="ef-sec sec hard">
+    <h3>高难关卡<small class="cjk">战争回响 / 影拓丰碑</small></h3>
+    <table>
+      <tr><td class="cmd"><code>/战争回响</code></td><td class="fn">本周轮换的三个关卡</td><td class="at"><span class="na">—</span></td><td class="note">显示剩余时间</td></tr>
+      <tr><td class="cmd"><code>/影拓丰碑</code></td><td class="fn">全部系列和关卡名</td><td class="at"><span class="na">—</span></td><td class="note">苦难模式全通即可镀层</td></tr>
+      <tr><td class="cmd"><code>/攻略 关卡名 难度</code></td><td class="fn">机制、敌人、本群通关阵容、推荐视频</td><td class="at"><span class="na">—</span></td><td class="note">例：<code>/攻略 重伤之围 残酷</code></td></tr>
+      <tr><td class="cmd"><code>/竞速榜</code></td><td class="fn">竞速榜目录，引导到回响 / 丰碑竞速</td><td class="at"><span class="na">—</span></td><td class="note">记不清关卡名就从这里进</td></tr>
+      <tr><td class="cmd"><code>/回响竞速 关卡名</code></td><td class="fn">战争回响本群最快通关排名</td><td class="at"><span class="na">—</span></td><td class="note">不带关卡名显示本周全部关卡</td></tr>
+      <tr><td class="cmd"><code>/丰碑竞速 丰碑名</code></td><td class="fn">影拓丰碑本群最快通关排名</td><td class="at"><span class="na">—</span></td><td class="note">不带参数列出全部丰碑；也可写单关名</td></tr>
+      <tr><td class="cmd"><code>/榜单角色出场率</code></td><td class="fn">全部绑定玩家的高难干员出场率（不分群）</td><td class="at"><span class="na">—</span></td><td class="note">可加 关卡名 / 战争回响 / 影拓丰碑</td></tr>
+      <tr><td class="cmd"><code>/攻略统计 退出</code></td><td class="fn">不参与阵容统计和竞速榜</td><td class="at"><span class="na">—</span></td><td class="note">重新加入发 <code>/攻略统计 加入</code></td></tr>
+    </table>
+  </div>
+
+  <div class="ef-sec sec ark">
+    <h3>明日方舟</h3>
+    <table>
+      <tr><td class="cmd"><code>/mrfz卡片</code></td><td class="fn">查看自己的明日方舟角色卡</td><td class="at"><span class="no">否</span></td><td class="note">查看群友请用 <code>/sk @用户</code></td></tr>
+      <tr><td class="cmd"><code>/mrfz签到</code></td><td class="fn">手动为自己的角色签到</td><td class="at"><span class="no">否</span></td><td class="note">每天 00:15 已自动签到</td></tr>
+      <tr><td class="cmd"><code>/mrfz签到详情</code></td><td class="fn">查看自己的签到状态</td><td class="at"><span class="no">否</span></td><td class="note">只能查询自己</td></tr>
+      <tr><td class="cmd"><code>/mrfz抽卡记录</code></td><td class="fn">查看自己的抽卡记录</td><td class="at"><span class="no">否</span></td><td class="note"></td></tr>
+      <tr><td class="cmd"><code>/导入抽卡记录 链接</code></td><td class="fn">导入抽卡记录导出链接</td><td class="at"><span class="no">否</span></td><td class="note">建议私聊发送链接</td></tr>
+      <tr><td class="cmd"><code>/方舟干员</code></td><td class="fn">干员一览，可追加筛选词</td><td class="at"><span class="yes">是</span></td><td class="note">例：<code>/方舟干员 6星 近卫</code></td></tr>
+      <tr><td class="cmd"><code>/树海肉鸽</code></td><td class="fn">查看肉鸽战绩（黑流树海）</td><td class="at"><span class="yes">是</span></td><td class="note">另有 界园 / 萨卡兹 / 萨米 / 水月 / 傀影肉鸽</td></tr>
+      <tr><td class="cmd"><code>/战绩详情 ID</code></td><td class="fn">查看单局肉鸽战绩详情</td><td class="at"><span class="no">否</span></td><td class="note">收藏的战绩用 <code>/收藏战绩详情 ID</code></td></tr>
+    </table>
+  </div>
+
+  <div class="ef-sec sec misc">
+    <h3>其他</h3>
+    <table>
+      <tr><td class="cmd"><code>/理智</code></td><td class="fn">查看方舟和终末地当前理智</td><td class="at"><span class="no">否</span></td><td class="note">显示多久后回满</td></tr>
+      <tr><td class="cmd"><code>/理智提醒 开</code></td><td class="fn">理智回满时在本群 @你</td><td class="at"><span class="no">否</span></td><td class="note">在群里开启；关闭发 <code>/理智提醒 关</code></td></tr>
+      <tr><td class="cmd"><code>/skl帮助</code></td><td class="fn">显示本帮助图</td><td class="at"><span class="no">否</span></td><td class="note"></td></tr>
+      <tr><td class="cmd"><code>/echo 1</code></td><td class="fn">测试机器人是否在线</td><td class="at"><span class="no">否</span></td><td class="note">私聊直接发；群里需先 @机器人</td></tr>
+      <tr><td class="cmd"><code>@机器人 /查询订阅</code></td><td class="fn">查看本群订阅的 B 站 UP 主</td><td class="at"><span class="na">—</span></td><td class="note">必须先 @机器人</td></tr>
+      <tr><td class="cmd"><code>/skland --help</code></td><td class="fn">查看 Skland 完整帮助</td><td class="at"><span class="no">否</span></td><td class="note">不确定用法时使用</td></tr>
+    </table>
+  </div>
+
+  <div class="ef-foot">
+    <span>出图通常需要 <b>5～20 秒</b>（<b>开盒 all</b> 图较大会更久），请耐心等待，不要重复发送。</span><span class="mark">PRIESTESS SYSTEM</span>
+  </div>
+</body>
+</html>

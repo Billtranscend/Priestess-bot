@@ -1,0 +1,260 @@
+{#- Restyled from endfield_card.html.jinja2 of nonebot-plugin-skland 0.7.1 (https://github.com/FrostN0v0/nonebot-plugin-skland), MIT License, Copyright (c) 2025 FrostN0v0. See THIRD_PARTY_NOTICES.md. -#}
+{% from 'endfield_macros.html.jinja2' import endfield_char_card, domain_card %}
+
+<!DOCTYPE html>
+
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Endfield Card</title>
+  {# 本模板由 plugins.skland_ef_theme 从本地目录渲染，文档 URL 指向本地目录；
+     <base> 让 "../images/..." 继续解析到插件包内的 resources/templates（simple_bg 是包内绝对路径） #}
+  <base href="file://{{ simple_bg.rsplit('/images/', 1)[0] }}/templates/">
+  <style>
+/* ef_theme.css() — plugins/ef_theme, inlined (templates are rendered by Jinja) */
+{{ ef_fonts | safe }}
+
+:root {
+  --ef-bg: #e3e3df; --ef-grid: rgba(20,20,20,.045);
+  --ef-panel: #f5f5f2; --ef-panel-2: #ebebe6; --ef-line: #cbcbc4; --ef-line-2: #deded8;
+  --ef-ink: #151515; --ef-sub: #66665f; --ef-faint: #96968e;
+  --ef-yellow: #ffe100; --ef-yellow-2: #f2d500; --ef-dark: #1b1c1e; --ef-dark-2: #2b2c2f;
+  --ef-silver: #b7bcc3; --ef-copper: #c2662c;
+  --ef-red: #e0452b; --ef-green: #2a9358; --ef-blue: #2f6fbe;
+  --ef-cjk: "WenQuanYi Zen Hei", sans-serif;
+  --ef-num: "EF Num", "Liberation Sans Narrow", "WenQuanYi Zen Hei", sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body.ef { font-family: var(--ef-cjk); color: var(--ef-ink); background-color: var(--ef-bg);
+  background-image: linear-gradient(var(--ef-grid) 1px, transparent 1px), linear-gradient(90deg, var(--ef-grid) 1px, transparent 1px);
+  background-size: 24px 24px; }
+.ef-num { font-family: var(--ef-num); font-variant-numeric: tabular-nums; letter-spacing: .2px; }
+
+/* page header: dark plate, yellow spine, hazard strip */
+.ef-head { position: relative; background: var(--ef-dark); color: #f4f4f0; padding: 20px 26px 22px 34px; overflow: hidden; }
+.ef-head:before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 10px; background: var(--ef-yellow); }
+.ef-head:after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 7px;
+  background: repeating-linear-gradient(-45deg, var(--ef-yellow) 0 12px, var(--ef-dark) 12px 24px); }
+.ef-head .k { font-family: var(--ef-num); font-weight: 600; font-size: 15px; letter-spacing: 4px; color: var(--ef-yellow); text-transform: uppercase; }
+.ef-head h1 { font-size: 40px; font-weight: 900; margin-top: 6px; letter-spacing: 1px; }
+.ef-head h1 em { font-style: normal; color: var(--ef-yellow); }
+.ef-head p { margin-top: 6px; font-size: 17px; color: #b9b9b2; }
+.ef-head .code { position: absolute; right: 24px; top: 18px; text-align: right; font-family: var(--ef-num); font-weight: 600;
+  font-size: 14px; letter-spacing: 2px; color: #8d8d86; line-height: 1.5; }
+.ef-head .code b { display: block; font-size: 30px; color: #f4f4f0; letter-spacing: 1px; }
+
+/* section panel */
+.ef-sec { margin-top: 16px; background: var(--ef-panel); border: 1px solid var(--ef-line); }
+.ef-sec > h3 { display: flex; align-items: center; gap: 10px; padding: 10px 16px; font-size: 21px; font-weight: 900;
+  border-bottom: 2px solid var(--ef-ink); background: var(--ef-panel); }
+.ef-sec > h3:before { content: ""; width: 6px; height: 20px; background: var(--ef-yellow); box-shadow: 0 0 0 1px var(--ef-ink); }
+.ef-sec > h3 small { margin-left: auto; font-family: var(--ef-num); font-weight: 600; font-size: 14px; letter-spacing: 1px; color: var(--ef-sub); }
+.ef-sec > h3 small.cjk { font-family: var(--ef-cjk); font-weight: 400; letter-spacing: 0; }
+
+/* small parts */
+.ef-tag { display: inline-block; font-size: 13px; padding: 1px 8px; border: 1px solid var(--ef-ink); background: var(--ef-panel); }
+.ef-tag.y { background: var(--ef-yellow); } .ef-tag.d { background: var(--ef-ink); color: #f4f4f0; }
+.ef-rank { display: inline-block; width: 26px; height: 26px; line-height: 26px; text-align: center; font-family: var(--ef-num);
+  font-weight: 700; font-size: 17px; background: var(--ef-panel-2); border: 1px solid var(--ef-line); }
+.ef-rank.r1 { background: var(--ef-yellow); border-color: var(--ef-ink); }
+.ef-rank.r2 { background: var(--ef-silver); color: var(--ef-ink); border-color: var(--ef-ink); } .ef-rank.r3 { background: var(--ef-copper); color: #fff; border-color: var(--ef-ink); }
+.ef-empty { padding: 14px 16px; color: var(--ef-faint); font-size: 16px; }
+.ef-foot { margin-top: 14px; display: flex; justify-content: space-between; align-items: center; gap: 16px; font-size: 13px; color: var(--ef-sub); line-height: 1.6; }
+.ef-foot .mark { font-family: var(--ef-num); font-weight: 600; letter-spacing: 3px; color: var(--ef-ink); white-space: nowrap; }
+.ef-foot .mark:before { content: ""; display: inline-block; width: 18px; height: 8px; margin-right: 8px; vertical-align: 1px;
+  background: repeating-linear-gradient(-45deg, var(--ef-yellow) 0 4px, var(--ef-ink) 4px 8px); }
+/* ---- /zmd开盒 card ---- */
+body.ef { width: 706px; }
+.page { padding: 16px 16px 14px; }
+.page.simple { background: var(--ef-bg); }
+img { display: block; }
+
+.ef-head.card-head { padding: 16px 18px 20px 26px; }
+.ef-head.card-head .k { font-size: 12px; letter-spacing: 3px; }
+.ef-head.card-head .code { right: 18px; top: 14px; font-size: 11px; }
+.ef-head.card-head .code b { font-size: 22px; }
+.who { display: flex; gap: 14px; align-items: center; margin-top: 10px; }
+.who .avatar { width: 64px; height: 64px; flex: none; border: 1px solid #6a6a64; outline: 3px solid var(--ef-dark);
+  outline-offset: -4px; background: var(--ef-dark-2); }
+.who .avatar img { width: 62px; height: 62px; object-fit: cover; }
+.who h1 { margin-top: 0; font-size: 28px; line-height: 1.15; }
+.who p { margin-top: 6px; font-size: 13px; display: flex; align-items: center; gap: 8px; color: #d6d6cf; }
+.who p .ef-tag { font-size: 12px; line-height: 16px; padding: 0 6px; color: var(--ef-ink); }
+.who p .ef-num { font-size: 17px; font-weight: 600; color: #f4f4f0; letter-spacing: .5px; }
+
+/* status tiles */
+.tiles { display: grid; grid-template-columns: 150px repeat(4, 1fr); grid-auto-rows: 58px; gap: 8px; margin-top: 12px; }
+.tile { position: relative; background: var(--ef-panel); border: 1px solid var(--ef-line); border-top: 3px solid var(--ef-ink);
+  padding: 5px 10px 0; overflow: hidden; }
+.tile:after { content: ""; position: absolute; right: 0; top: 0; width: 14px; height: 3px; background: var(--ef-yellow); }
+.tile b { display: block; font-family: var(--ef-num); font-weight: 700; font-size: 24px; line-height: 1.05; letter-spacing: .3px; }
+.tile small { display: block; margin-top: 2px; font-size: 12px; color: var(--ef-sub); white-space: nowrap; }
+.tile.stamina { grid-row: span 2; padding-top: 6px; }
+.tile.stamina small.t { margin: 0; font-size: 13px; font-weight: 700; color: var(--ef-ink); }
+.tile.stamina b { font-size: 34px; margin-top: 2px; }
+.tile.stamina b i { font-style: normal; color: var(--ef-faint); margin: 0 3px; font-size: 22px; }
+.tile.stamina b span { font-size: 20px; color: var(--ef-sub); }
+.tile.stamina .rt { display: flex; justify-content: space-between; align-items: baseline; margin-top: 6px; font-size: 12px; color: var(--ef-sub); }
+.tile.stamina .rt span { font-family: var(--ef-num); font-weight: 600; font-size: 16px; color: var(--ef-ink); }
+.tile.stamina .bar { position: absolute; left: 0; right: 0; bottom: 0; }
+
+/* bars: square track, yellow fill */
+.bar { height: 6px; background: var(--ef-line-2); border-top: 1px solid var(--ef-line); }
+.bar u { display: block; height: 100%; background: var(--ef-yellow); box-shadow: inset -1px 0 0 var(--ef-ink); }
+
+/* section overrides for the narrow card */
+.ef-sec { margin-top: 12px; }
+.ef-sec > h3 { padding: 7px 12px; font-size: 16px; gap: 8px; }
+.ef-sec > h3:before { width: 5px; height: 15px; }
+.ef-sec > h3 small { font-size: 13px; }
+
+/* missions */
+.missions { display: grid; grid-template-columns: repeat(3, 1fr); }
+.mission { padding: 9px 12px 11px; }
+.mission + .mission { border-left: 1px solid var(--ef-line-2); }
+.mission .ml { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+.mission .ml span { font-size: 13px; font-weight: 700; }
+.mission .ml b { font-family: var(--ef-num); font-weight: 700; font-size: 20px; line-height: 1; }
+.mission .ml b i { font-style: normal; color: var(--ef-faint); margin: 0 2px; }
+
+/* domains */
+.domains { display: grid; grid-template-columns: 1fr 1fr; }
+.domain { padding: 10px 12px 12px; }
+.domain:nth-child(even) { border-left: 1px solid var(--ef-line-2); }
+.domain:nth-child(n+3) { border-top: 1px solid var(--ef-line-2); }
+.domain .dh { display: flex; align-items: center; gap: 8px; padding-bottom: 7px; border-bottom: 1px solid var(--ef-line); }
+.domain .dh b { font-size: 16px; font-weight: 900; }
+.domain .dh .lv { font-family: var(--ef-num); font-weight: 600; font-size: 13px; line-height: 16px; padding: 0 5px;
+  background: var(--ef-ink); color: #f4f4f0; letter-spacing: .3px; }
+.domain .dh .money { margin-left: auto; font-family: var(--ef-num); font-weight: 600; font-size: 14px; color: var(--ef-sub); }
+.settle { margin-top: 8px; }
+.settle .sl { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
+.settle .officer { width: 26px; height: 26px; flex: none; background: var(--ef-panel-2); border: 1px solid var(--ef-line); object-fit: cover; }
+.settle .sn { display: flex; flex-direction: column; min-width: 0; line-height: 1.15; }
+.settle .sn small { font-family: var(--ef-num); font-weight: 600; font-size: 12px; color: var(--ef-sub); }
+.settle .sn span { font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.settle .sv { margin-left: auto; align-self: flex-end; font-family: var(--ef-num); font-weight: 600; font-size: 14px; white-space: nowrap; }
+.settle .bar { height: 5px; }
+
+/* operators */
+.ops { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 12px; }
+.op { background: var(--ef-panel); border: 1px solid var(--ef-ink); min-width: 0; }
+.op-art { position: relative; height: 196px; background: var(--ef-panel-2); overflow: hidden; }
+.op-art .portrait { width: 100%; height: 100%; object-fit: cover; object-position: center top; }
+.op-icons { position: absolute; left: 3px; top: 3px; display: flex; flex-direction: column; gap: 2px; }
+.op-icons img { width: 18px; height: 18px; border: 1px solid var(--ef-ink); }
+.op-equips { position: absolute; right: 0; top: 0; display: flex; flex-direction: column; }
+.op-equips .eq { width: 28px; height: 28px; background: rgba(245,245,242,.92); border-left: 1px solid var(--ef-ink);
+  border-bottom: 1px solid var(--ef-ink); border-right: 3px solid; }
+.op-equips .eq img { width: 24px; height: 26px; object-fit: contain; margin-left: 1px; }
+.op-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 30px; display: flex; align-items: center; gap: 4px;
+  background: rgba(27,28,30,.9); border-top: 2px solid var(--ef-yellow); }
+.op-wpn { position: relative; width: 30px; height: 28px; flex: none; background: var(--ef-panel); border-bottom: 3px solid; }
+.op-wpn img { width: 28px; height: 25px; object-fit: contain; margin-left: 1px; }
+.op-wpn span { position: absolute; right: 0; bottom: 0; min-width: 11px; height: 11px; line-height: 11px; text-align: center;
+  font-family: var(--ef-num); font-weight: 700; font-size: 10px; background: var(--ef-ink); color: #f4f4f0; }
+.op-pot { width: 22px; height: 22px; flex: none; }
+.op-lv { display: flex; align-items: baseline; margin-left: auto; padding-right: 5px; color: #f4f4f0; font-family: var(--ef-num); }
+.op-lv small { font-weight: 600; font-size: 12px; margin-right: 1px; }
+.op-lv b { font-weight: 700; font-size: 22px; line-height: 1; letter-spacing: .3px; }
+.op-lv img { width: 14px; height: 14px; object-fit: contain; margin-left: 3px; align-self: center; }
+.op-name { height: 28px; display: flex; align-items: center; padding: 0 7px; font-size: 14px; font-weight: 900;
+  border-top: 1px solid var(--ef-ink); border-bottom: 4px solid; white-space: nowrap; overflow: hidden; }
+
+.ef-foot { margin-top: 10px; font-size: 12px; }
+  </style>
+
+</head>
+
+<body class="ef">
+  {# simple 模式与普通模式均使用主题底色；simple 模式去掉网格底纹 #}
+  <div class="page{% if simple_bg_enabled %} simple{% endif %}">
+
+    <div class="ef-head card-head">
+      <div class="code">UID<b>{{ base.roleId }}</b></div>
+      <div class="k">Endfield · Operator Card</div>
+      {# 头像信息 #}
+      <div class="who">
+        <div class="avatar"><img src="{{ base.avatarUrl }}" alt="avatar" /></div>
+        <div>
+          <h1>{{ base.name }}</h1>
+          <p><span class="ef-tag y">苏醒日</span><span class="ef-num">{{ base.createTime | format_date_ymd }}</span></p>
+        </div>
+      </div>
+    </div>
+
+    {# 理智 + 八项数据 #}
+    <div class="tiles">
+      <div class="tile stamina">
+        <small class="t">理智</small>
+        <b>{{ dungeon.curStamina }}<i>/</i><span>{{ dungeon.maxStamina }}</span></b>
+        <div class="rt">回复时间<span>{{ stamina_remaining_seconds | format_stamina_time }}</span></div>
+        <div class="bar"><u style="width: {{ stamina_percent | int }}%"></u></div>
+      </div>
+      <div class="tile"><b>{{ base.level }}</b><small>探索等阶</small></div>
+      <div class="tile"><b>{{ base.worldLevel }}</b><small>探索等级</small></div>
+      <div class="tile"><b>{{ base.charNum }}</b><small>干员</small></div>
+      <div class="tile"><b>{{ base.weaponNum }}</b><small>武器</small></div>
+      <div class="tile"><b>{{ control_center_level }}</b><small>总控中枢等级</small></div>
+      <div class="tile"><b>{{ total_puzzle_count }}</b><small>醚质</small></div>
+      <div class="tile"><b>{{ total_trchest_count }}</b><small>储藏箱</small></div>
+      <div class="tile"><b>{{ achieve.count }}</b><small>光荣之路</small></div>
+    </div>
+
+    {# 活跃度 / 通行证 / 每周事务 #}
+    <div class="ef-sec">
+      <h3>事务</h3>
+      <div class="missions">
+        <div class="mission">
+          <div class="ml"><span>活跃度</span><b>{{ dailyMission.dailyActivation }}<i>/</i>{{ dailyMission.maxDailyActivation }}</b></div>
+          {% set daily_percent = (dailyMission.dailyActivation / dailyMission.maxDailyActivation * 100) | int if
+          dailyMission.maxDailyActivation > 0 else 0 %}
+          <div class="bar"><u style="width: {{ daily_percent }}%"></u></div>
+        </div>
+        <div class="mission">
+          <div class="ml"><span>通行证</span><b>{{ bpSystem.curLevel }}<i>/</i>{{ bpSystem.maxLevel }}</b></div>
+          {% set bp_percent = (bpSystem.curLevel / bpSystem.maxLevel * 100) | int if bpSystem.maxLevel > 0 else 0 %}
+          <div class="bar"><u style="width: {{ bp_percent }}%"></u></div>
+        </div>
+        <div class="mission">
+          <div class="ml"><span>每周事务</span><b>{{ weeklyMission.score }}<i>/</i>{{ weeklyMission.total }}</b></div>
+          {% set weekly_percent = (weeklyMission.score / weeklyMission.total * 100) | int if weeklyMission.total > 0
+          else 0 %}
+          <div class="bar"><u style="width: {{ weekly_percent }}%"></u></div>
+        </div>
+      </div>
+    </div>
+
+    {# 据点 #}
+    {% if domain %}
+    <div class="ef-sec">
+      <h3>据点</h3>
+      <div class="domains">
+        {% for d in domain %}
+        {{ domain_card(d) }}
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    {# 干员列表 #}
+    <div class="ef-sec">
+      <h3>干员<small>{{ chars | length }}</small></h3>
+      {% if chars %}
+      <div class="ops">
+        {% for char in chars %}
+        {{ endfield_char_card(char) }}
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="ef-empty">暂无展示干员</div>
+      {% endif %}
+    </div>
+
+    {# 底部签名 #}
+    <div class="ef-foot"><span>Generated by nonebot-plugin-skland</span><span class="mark">PRIESTESS SYSTEM</span></div>
+  </div>
+</body>
+
+</html>

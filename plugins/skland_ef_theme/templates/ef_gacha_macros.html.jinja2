@@ -1,0 +1,254 @@
+{#- Restyled from ef_gacha_macros.html.jinja2 of nonebot-plugin-skland 0.7.1 (https://github.com/FrostN0v0/nonebot-plugin-skland), MIT License, Copyright (c) 2025 FrostN0v0. See THIRD_PARTY_NOTICES.md. -#}
+{# 终末地单卡池渲染宏 #}
+{% macro ef_pool_card(pool, pool_label, pool_color, gacha_data=none) %}
+{% set stats = namespace(pity_count=0, five_stars=[]) %}
+{% set show_spook = pool.show_spook_stats %}
+
+<div class="pool">
+    {# 卡池头部 #}
+    {# Banner 装饰图 (1151×146 宽幅横条)；无图时不占位 #}
+    {% if pool.up6_img %}
+    <div class="banner">
+        <img src="{{ pool.up6_img }}" />
+    </div>
+    {% endif %}
+
+    {# 卡池名称 + 抽数 #}
+    <div class="ph">
+        <div class="pn">
+            <b>{{ pool.pool_name }}</b>
+            {% if pool.up_six_chars %}
+            <div class="up">
+                <span>UP</span>
+                {% for up_char_id in pool.up_six_chars %}
+                <img src="{{ up_char_id | ef_charId_to_avatarUrl }}" />
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+        <div class="pc">
+            <b>{{ pool.total_pulls }}</b>
+            <small>抽</small>
+        </div>
+    </div>
+
+    {# 卡池统计条 #}
+    <div class="ps">
+        <div>
+            <b><span class="six">{{ pool.total_six_stars }}</span>{% if show_spook %}<i>/</i><span class="spook">{{ pool.total_six_spook }}</span>{% endif %}</b>
+            <small>{% if show_spook %}6★/歪{% else %}6★{% endif %}</small>
+        </div>
+        <div>
+            <b>{{ pool.pity_count }}</b>
+            <small>已垫</small>
+        </div>
+    </div>
+
+    {# 卡池记录列表 #}
+    <div class="recs">
+        {% for record in pool.records | reverse %}
+        {# 分离免费和付费抽 #}
+        {% set free_pulls_in_group = record.pulls | selectattr('is_free') | list %}
+        {% set paid_pulls_in_group = record.pulls | rejectattr('is_free') | list %}
+
+        {# ── 免费十连条目（不计入保底） ── #}
+        {% if free_pulls_in_group %}
+        {% set free_sixes = free_pulls_in_group | selectattr('rarity', 'equalto', 6) | list %}
+        {% set free_fives = free_pulls_in_group | selectattr('rarity', 'equalto', 5) | list %}
+        {% if free_sixes %}
+        {# 免费十连出了6★，每个6★单独显示 #}
+        {% set multi_free_six = free_sixes | length >= 2 %}
+        {% set free_six_idx = namespace(value=0) %}
+        {% for pull in free_sixes | reverse %}
+        {% set free_six_idx.value = free_six_idx.value + 1 %}
+        <div class="rec free{% if multi_free_six %} multi{% endif %}">
+            {% if free_six_idx.value == free_sixes | length %}
+            <div class="grp free">
+                <span>免费10连{% if multi_free_six %} · {{ free_sixes | length }}金{% endif %}</span>
+            </div>
+            {% endif %}
+
+            <div class="rr">
+                {# 左侧：角色头像 + 日期 #}
+                <div class="ra">
+                    <img src="{{ pull.item_id | ef_charId_to_avatarUrl }}" class="av" />
+                    <span class="date">{{ record.gacha_ts | format_timestamp_md }}</span>
+                </div>
+
+                {# 右侧：角色名 + 进度条 + 五星 #}
+                <div class="rb">
+                    <div class="rn">
+                        <b>{{ pull.item_name }}</b>
+                        {% if show_spook and pull.item_id not in pool.up_six_chars %}
+                        <span class="t spk">歪</span>
+                        {% endif %}
+                        {% if pool.up_six_chars and pull.item_id in pool.up_six_chars %}
+                        <span class="t up">UP</span>
+                        {% endif %}
+                        <span class="t free">FREE</span>
+                    </div>
+                    <div class="free-bar">
+                        <span>不计入保底</span>
+                    </div>
+                    {# 免费十连中出的5星 #}
+                    {% if free_six_idx.value == 1 and free_fives %}
+                    <div class="fives">
+                        {% for group in free_fives | sort(attribute='item_id') | groupby('item_id') %}
+                        <div>
+                            <img src="{{ group.list[0].item_id | ef_charId_to_avatarUrl }}" />
+                            {% if group.list | length > 1 %}
+                            <span>{{ group.list | length }}</span>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+        {% else %}
+        {# 免费十连未出6★，显示汇总条目 #}
+        <div class="rec free">
+            <div class="rr">
+                <div class="ra">
+                    <div class="av box">FREE</div>
+                    <span class="date">{{ record.gacha_ts | format_timestamp_md }}</span>
+                </div>
+                <div class="rb">
+                    <div class="rn">
+                        <b>免费10连</b>
+                        <span class="t free">FREE</span>
+                    </div>
+                    <div class="free-bar">
+                        <span>未出6★</span>
+                    </div>
+                    {# 免费十连中出的5星 #}
+                    {% if free_fives %}
+                    <div class="fives">
+                        {% for group in free_fives | sort(attribute='item_id') | groupby('item_id') %}
+                        <div>
+                            <img src="{{ group.list[0].item_id | ef_charId_to_avatarUrl }}" />
+                            {% if group.list | length > 1 %}
+                            <span>{{ group.list | length }}</span>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+        {% endif %}
+
+        {# ── 付费抽卡记录（正常保底逻辑） ── #}
+        {% if paid_pulls_in_group %}
+        {% set six_count = paid_pulls_in_group | selectattr('rarity', 'equalto', 6) | list | length %}
+        {% set is_multi_six = six_count >= 2 %}
+        {% set six_index = namespace(value=0) %}
+
+        {% for pull in paid_pulls_in_group | reverse %}
+        {% set stats.pity_count = stats.pity_count + 1 %}
+
+        {% if pull.rarity == 5 %}
+        {% set stats.five_stars = stats.five_stars + [pull] %}
+        {% endif %}
+
+        {% if pull.rarity == 6 %}
+        {% set six_index.value = six_index.value + 1 %}
+
+        <div class="rec{% if is_multi_six %} multi{% endif %}{% if is_multi_six and six_index.value == six_count %} lead{% endif %}">
+            {% if is_multi_six and six_index.value == six_count %}
+            <div class="grp">
+                <span>十连{{ six_count }}金</span>
+            </div>
+            {% endif %}
+
+            <div class="rr">
+                {# 左侧：角色头像 + 日期 #}
+                <div class="ra">
+                    <img src="{{ pull.item_id | ef_charId_to_avatarUrl }}" class="av" />
+                    <span class="date">{{ record.gacha_ts | format_timestamp_md }}</span>
+                </div>
+
+                {# 右侧：角色名（压在进度条上方）+ 进度条 + 五星头像 #}
+                <div class="rb">
+                    {# 角色名 + 标记，压在进度条上方 #}
+                    <div class="rn">
+                        <b>{{ pull.item_name }}</b>
+                        {% if show_spook and pull.item_id not in pool.up_six_chars %}
+                        <span class="t spk">歪</span>
+                        {% endif %}
+                        {% if pool.up_six_chars and pull.item_id in pool.up_six_chars %}
+                        <span class="t up">UP</span>
+                        {% endif %}
+                        {% if pull.is_new %}
+                        <span class="t new">NEW</span>
+                        {% endif %}
+                        {% if stats.pity_count <= 10 or stats.pity_count >= 70 %}
+                        <span class="t {% if stats.pity_count <= 10 %}lucky{% else %}unlucky{% endif %}">
+                            {% if stats.pity_count <= 10 %}超欧{% elif stats.pity_count >= 70 %}超非{% endif %}
+                        </span>
+                        {% endif %}
+                    </div>
+                    {# 进度条（抽数显示在条内，限定最小宽度） #}
+                    {% set bar_class = 'green-stripe-bar' %}
+                    {% if stats.pity_count >= 70 %}
+                    {% set bar_class = 'red-stripe-bar' %}
+                    {% elif stats.pity_count >= 45 %}
+                    {% set bar_class = 'yellow-stripe-bar' %}
+                    {% endif %}
+                    <div class="pity {{ bar_class }}"
+                        style="width: {{ [15 + (stats.pity_count / 80) * 85, 100] | min }}%; min-width: 40px;">
+                        <span>{{ stats.pity_count }}抽</span>
+                    </div>
+                    {# 中间出的5星（头像形式，重复角色带数字角标） #}
+                    {% if stats.five_stars %}
+                    <div class="fives">
+                        {% for group in stats.five_stars | sort(attribute='item_id') | groupby('item_id') %}
+                        <div>
+                            <img src="{{ group.list[0].item_id | ef_charId_to_avatarUrl }}" />
+                            {% if group.list | length > 1 %}
+                            <span>{{ group.list | length }}</span>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% set stats.pity_count = 0 %}
+        {% set stats.five_stars = [] %}
+        {% endif %}
+        {% endfor %}
+        {% endif %}
+
+        {% endfor %}
+    </div>
+</div>
+{% endmacro %}
+
+
+{# 卡池分类列渲染 #}
+{% macro ef_pool_column(pools, category_label, category_color, gacha_data=none, visible_pool_ids=none) %}
+{% if visible_pool_ids is not none %}
+{% set filtered_pools = pools | selectattr('pool_id', 'in', visible_pool_ids) | list %}
+{% else %}
+{% set filtered_pools = pools %}
+{% endif %}
+{% if filtered_pools %}
+<div class="col">
+    <div class="ef-sec">
+        {# 分类标题 #}
+        <h3>{{ category_label }}<small>{{ filtered_pools | sum(attribute='total_pulls') }}<i>抽</i></small></h3>
+        <div class="pools">
+            {% for pool in filtered_pools %}
+            {{ ef_pool_card(pool, category_label, category_color, gacha_data=gacha_data) }}
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endmacro %}

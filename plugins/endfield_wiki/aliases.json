@@ -1,0 +1,520 @@
+{
+  "_说明": "昵称表：operators 下每个干员的 aliases 是玩家常用外号；signature_weapon 是专武；recommended_weapon 是没有专武时 /xx专武 返回的推荐武器。weapons 下是武器简称。修改后无需重启，下次查询自动生效。",
+  "operators": {
+    "管理员": {
+      "aliases": [
+        "男管",
+        "女管",
+        "Endmin",
+        "Endministrator",
+        "企鹅",
+        "小企鹅",
+        "咕咕嘎嘎",
+        "虎鲸",
+        "黑面煞",
+        "假面滑索侠",
+        "怪盗假面",
+        "天空骑士",
+        "黑骑士",
+        "源石的孩子",
+        "管理员A",
+        "管理员B",
+        "Penguinistrator"
+      ],
+      "signature_weapon": "宏愿",
+      "recommended_weapon": null
+    },
+    "余烬": {
+      "aliases": [
+        "Ember",
+        "阿兹瑞拉",
+        "大运"
+      ],
+      "signature_weapon": "大雷斑",
+      "recommended_weapon": null
+    },
+    "洁尔佩塔": {
+      "aliases": [
+        "洁哥",
+        "终末地洁哥",
+        "异格洁哥",
+        "洁尔",
+        "jept",
+        "Gilberta",
+        "安洁莉娜",
+        "杰哥",
+        "信使小姐"
+      ],
+      "signature_weapon": "使命必达",
+      "recommended_weapon": null
+    },
+    "黎风": {
+      "aliases": [
+        "轻岳",
+        "单岳",
+        "Lifeng",
+        "黎小弟",
+        "庄天风",
+        "黎风大小姐"
+      ],
+      "signature_weapon": "负山",
+      "recommended_weapon": null
+    },
+    "莱万汀": {
+      "aliases": [
+        "莱万",
+        "莱瓦汀",
+        "lwt",
+        "Laevatain",
+        "42",
+        "42姐",
+        "42奶奶",
+        "史尔特尔",
+        "奶奶"
+      ],
+      "signature_weapon": "熔铸火焰",
+      "recommended_weapon": null
+    },
+    "伊冯": {
+      "aliases": [
+        "超级迭代人",
+        "Yvonne",
+        "奶龙",
+        "粉色奶龙"
+      ],
+      "signature_weapon": "艺术暴君",
+      "recommended_weapon": null
+    },
+    "艾尔黛拉": {
+      "aliases": [
+        "小羊",
+        "黛拉",
+        "Ardelia",
+        "羊",
+        "艾雅法拉"
+      ],
+      "signature_weapon": "沧溟星梦",
+      "recommended_weapon": null
+    },
+    "别礼": {
+      "aliases": [
+        "Last Rite",
+        "LastRite",
+        "阿德尔海德",
+        "贪吃鬼",
+        "迷糊大王"
+      ],
+      "signature_weapon": "赫拉芬格",
+      "recommended_weapon": null
+    },
+    "汤汤": {
+      "aliases": [
+        "大当家",
+        "二姑娘",
+        "白虎",
+        "Soupsoup",
+        "Tangtang",
+        "哈基汤",
+        "小猫崽子",
+        "欠揍的小猫崽子",
+        "姑奶奶",
+        "小白虎"
+      ],
+      "signature_weapon": "落草",
+      "recommended_weapon": null
+    },
+    "洛茜": {
+      "aliases": [
+        "小红帽",
+        "红骑士",
+        "Teensy Weensy",
+        "Rossi",
+        "狼妹",
+        "洛茜娜"
+      ],
+      "signature_weapon": "狼之绯",
+      "recommended_weapon": null
+    },
+    "骏卫": {
+      "aliases": [
+        "小爷子",
+        "Pogranichnik",
+        "赫尔森",
+        "POG",
+        "老爷子",
+        "鹰精"
+      ],
+      "signature_weapon": "不知归",
+      "recommended_weapon": null
+    },
+    "庄方宜": {
+      "aliases": [
+        "小庄",
+        "阿庄",
+        "庄天师",
+        "庄管代",
+        "庄姐姐",
+        "大葱姐",
+        "zfy",
+        "Zhuang Fangyi",
+        "ZhuangFangyi",
+        "窜天雷",
+        "窜天雷天师",
+        "庄大葱",
+        "庄姐",
+        "大葱"
+      ],
+      "signature_weapon": "孤舟",
+      "recommended_weapon": null
+    },
+    "弭弗": {
+      "aliases": [
+        "弥弗",
+        "弭队",
+        "弭弗姐",
+        "Mifu",
+        "Mi Fu",
+        "红脸婆",
+        "煞星",
+        "弥弗姐"
+      ],
+      "signature_weapon": "赤缨",
+      "recommended_weapon": null
+    },
+    "诀": {
+      "aliases": [
+        "小鸟",
+        "荔枝盐",
+        "Arcane",
+        "李织烟",
+        "织烟",
+        "烧鸟",
+        "骚鸟",
+        "决",
+        "李老师"
+      ],
+      "signature_weapon": "四二式·肃阵",
+      "recommended_weapon": null
+    },
+    "卡缪": {
+      "aliases": [
+        "血魔小君",
+        "Camille",
+        "卡缪·亚尔诺"
+      ],
+      "signature_weapon": "镀红祝福",
+      "recommended_weapon": null
+    },
+    "提弗洛斯": {
+      "aliases": [
+        "提丰",
+        "小提丰",
+        "提丰再旅者",
+        "提弗",
+        "Typhoeus",
+        "呼呼呼",
+        "小台风",
+        "提丰妈妈",
+        "提小妹"
+      ],
+      "signature_weapon": "寒夜幽影",
+      "recommended_weapon": null
+    },
+    "梨诺": {
+      "aliases": [
+        "Liino",
+        "小偶像",
+        "两角初华",
+        "魔族佬偶像"
+      ],
+      "signature_weapon": "曜夜的首演",
+      "recommended_weapon": null
+    },
+    "佩丽卡": {
+      "aliases": [
+        "plk",
+        "小鹈鹕",
+        "白面书生",
+        "Perlica",
+        "鹈鹕",
+        "佩里卡"
+      ],
+      "signature_weapon": null,
+      "recommended_weapon": null
+    },
+    "陈千语": {
+      "aliases": [
+        "小陈",
+        "千语",
+        "小青龙",
+        "cqy",
+        "Chen Qianyu",
+        "ChenQianyu",
+        "啥子",
+        "啥龙",
+        "傻龙",
+        "傻子陈",
+        "陈干活",
+        "迷糊小陈",
+        "Dragon Dia"
+      ],
+      "signature_weapon": null,
+      "recommended_weapon": null
+    },
+    "狼卫": {
+      "aliases": [
+        "Wulfgard",
+        "卡特洛"
+      ],
+      "signature_weapon": null,
+      "recommended_weapon": null
+    },
+    "弧光": {
+      "aliases": [
+        "Arclight",
+        "弧光作战",
+        "伊库特",
+        "Ekut"
+      ],
+      "signature_weapon": null,
+      "recommended_weapon": null
+    },
+    "赛希": {
+      "aliases": [
+        "Xaihi",
+        "塞希",
+        "塞西",
+        "赛西",
+        "塞拉菲娜",
+        "修女赛希"
+      ],
+      "signature_weapon": null,
+      "recommended_weapon": null
+    },
+    "艾维文娜": {
+      "aliases": [
+        "电兔",
+        "艾维",
+        "Avywenna",
+        "电兔大人",
+        "兰珀",
+        "艾维纹娜"
+      ],
+      "signature_weapon": null,
+      "recommended_weapon": null
+    },
+    "昼雪": {
+      "aliases": [
+        "Snowshine",
+        "极光",
+        "艾尔温"
+      ],
+      "signature_weapon": null,
+      "recommended_weapon": null
+    },
+    "大潘": {
+      "aliases": [
+        "熊猫",
+        "潘工",
+        "潘天师",
+        "sofree",
+        "Da Pan",
+        "DaPan",
+        "扫福瑞",
+        "潘叔",
+        "潘远"
+      ],
+      "signature_weapon": null,
+      "recommended_weapon": null
+    },
+    "阿列什": {
+      "aliases": [
+        "钓鱼佬",
+        "Alesh",
+        "小浣熊"
+      ],
+      "signature_weapon": null,
+      "recommended_weapon": "逐鳞3.0"
+    },
+    "噗切娜": {
+      "aliases": [
+        "Purrchena",
+        "大菲林",
+        "胖猫",
+        "罗莎琳"
+      ],
+      "signature_weapon": null,
+      "recommended_weapon": "点心时刻"
+    },
+    "秋栗": {
+      "aliases": [
+        "秋栗糕",
+        "Akekuri",
+        "斯波红叶",
+        "红叶",
+        "元气小狗"
+      ],
+      "signature_weapon": null,
+      "recommended_weapon": null
+    },
+    "卡契尔": {
+      "aliases": [
+        "Catcher",
+        "鲁伊"
+      ],
+      "signature_weapon": null,
+      "recommended_weapon": null
+    },
+    "埃特拉": {
+      "aliases": [
+        "Estella",
+        "埃特拉小猫"
+      ],
+      "signature_weapon": null,
+      "recommended_weapon": null
+    },
+    "萤石": {
+      "aliases": [
+        "Fluorite",
+        "嘉维尔",
+        "尤贝尔",
+        "蛇蛇",
+        "萤法师",
+        "维若娜",
+        "Sneg"
+      ],
+      "signature_weapon": null,
+      "recommended_weapon": null
+    },
+    "安塔尔": {
+      "aliases": [
+        "12F",
+        "太子爷",
+        "Antal"
+      ],
+      "signature_weapon": null,
+      "recommended_weapon": null
+    }
+  },
+  "weapons": {
+    "宏愿": [],
+    "大雷斑": [
+      "雷斑"
+    ],
+    "使命必达": [],
+    "负山": [],
+    "熔铸火焰": [
+      "熔铸"
+    ],
+    "艺术暴君": [
+      "暴君"
+    ],
+    "沧溟星梦": [
+      "沧溟"
+    ],
+    "赫拉芬格": [
+      "赫拉"
+    ],
+    "落草": [],
+    "狼之绯": [
+      "狼绯"
+    ],
+    "不知归": [],
+    "孤舟": [],
+    "赤缨": [],
+    "四二式·肃阵": [
+      "四二式肃阵",
+      "42式肃阵",
+      "42式",
+      "肃阵"
+    ],
+    "镀红祝福": [
+      "镀红"
+    ],
+    "寒夜幽影": [
+      "寒夜"
+    ],
+    "曜夜的首演": [
+      "曜夜首演",
+      "首演"
+    ],
+    "逐鳞3.0": [
+      "逐鳞",
+      "逐鳞3",
+      "逐鳞三"
+    ],
+    "点心时刻": [
+      "叉子",
+      "点心"
+    ],
+    "灯火使命": [
+      "钻头",
+      "大钻头",
+      "雷霆大钻头",
+      "灯火"
+    ],
+    "热熔切割器": [
+      "热熔",
+      "切割器"
+    ],
+    "J.E.T.": [
+      "JET"
+    ],
+    "作品：蚀迹": [
+      "蚀迹",
+      "作品蚀迹"
+    ],
+    "作品：众生": [
+      "众生",
+      "作品众生"
+    ],
+    "钢铁余音": [
+      "钢铁"
+    ],
+    "骑士精神": [
+      "骑士"
+    ],
+    "爆破单元": [
+      "爆破"
+    ],
+    "迷失荒野": [
+      "迷失"
+    ],
+    "O.B.J.轻芒": [
+      "轻芒",
+      "OBJ轻芒"
+    ],
+    "O.B.J.重荷": [
+      "重荷",
+      "OBJ重荷"
+    ],
+    "O.B.J.术识": [
+      "术识",
+      "OBJ术识"
+    ],
+    "O.B.J.迅极": [
+      "迅极",
+      "OBJ迅极"
+    ],
+    "O.B.J.尖峰": [
+      "尖峰",
+      "OBJ尖峰"
+    ],
+    "破碎君王": [
+      "君王",
+      "碎王"
+    ],
+    "显赫声名": [
+      "显赫"
+    ],
+    "嵌合正义": [
+      "嵌合"
+    ],
+    "布道自由": [
+      "布道"
+    ],
+    "全自动骇新星": [
+      "骇新星"
+    ]
+  }
+}

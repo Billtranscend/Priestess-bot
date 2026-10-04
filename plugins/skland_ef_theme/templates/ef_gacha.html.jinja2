@@ -1,0 +1,400 @@
+{#- Restyled from ef_gacha.html.jinja2 of nonebot-plugin-skland 0.7.1 (https://github.com/FrostN0v0/nonebot-plugin-skland), MIT License, Copyright (c) 2025 FrostN0v0. See THIRD_PARTY_NOTICES.md. -#}
+{% from "ef_gacha_macros.html.jinja2" import ef_pool_column, ef_pool_card %}
+
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Endfield Gacha History</title>
+    <style>
+/* ef_theme.css() — plugins/ef_theme, inlined (templates are rendered by Jinja) */
+{{ ef_fonts | safe }}
+
+:root {
+  --ef-bg: #e3e3df; --ef-grid: rgba(20,20,20,.045);
+  --ef-panel: #f5f5f2; --ef-panel-2: #ebebe6; --ef-line: #cbcbc4; --ef-line-2: #deded8;
+  --ef-ink: #151515; --ef-sub: #66665f; --ef-faint: #96968e;
+  --ef-yellow: #ffe100; --ef-yellow-2: #f2d500; --ef-dark: #1b1c1e; --ef-dark-2: #2b2c2f;
+  --ef-silver: #b7bcc3; --ef-copper: #c2662c;
+  --ef-red: #e0452b; --ef-green: #2a9358; --ef-blue: #2f6fbe;
+  --ef-cjk: "WenQuanYi Zen Hei", sans-serif;
+  --ef-num: "EF Num", "Liberation Sans Narrow", "WenQuanYi Zen Hei", sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body.ef { font-family: var(--ef-cjk); color: var(--ef-ink); background-color: var(--ef-bg);
+  background-image: linear-gradient(var(--ef-grid) 1px, transparent 1px), linear-gradient(90deg, var(--ef-grid) 1px, transparent 1px);
+  background-size: 24px 24px; }
+.ef-num { font-family: var(--ef-num); font-variant-numeric: tabular-nums; letter-spacing: .2px; }
+
+/* page header: dark plate, yellow spine, hazard strip */
+.ef-head { position: relative; background: var(--ef-dark); color: #f4f4f0; padding: 20px 26px 22px 34px; overflow: hidden; }
+.ef-head:before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 10px; background: var(--ef-yellow); }
+.ef-head:after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 7px;
+  background: repeating-linear-gradient(-45deg, var(--ef-yellow) 0 12px, var(--ef-dark) 12px 24px); }
+.ef-head .k { font-family: var(--ef-num); font-weight: 600; font-size: 15px; letter-spacing: 4px; color: var(--ef-yellow); text-transform: uppercase; }
+.ef-head h1 { font-size: 40px; font-weight: 900; margin-top: 6px; letter-spacing: 1px; }
+.ef-head h1 em { font-style: normal; color: var(--ef-yellow); }
+.ef-head p { margin-top: 6px; font-size: 17px; color: #b9b9b2; }
+.ef-head .code { position: absolute; right: 24px; top: 18px; text-align: right; font-family: var(--ef-num); font-weight: 600;
+  font-size: 14px; letter-spacing: 2px; color: #8d8d86; line-height: 1.5; }
+.ef-head .code b { display: block; font-size: 30px; color: #f4f4f0; letter-spacing: 1px; }
+
+/* section panel */
+.ef-sec { margin-top: 16px; background: var(--ef-panel); border: 1px solid var(--ef-line); }
+.ef-sec > h3 { display: flex; align-items: center; gap: 10px; padding: 10px 16px; font-size: 21px; font-weight: 900;
+  border-bottom: 2px solid var(--ef-ink); background: var(--ef-panel); }
+.ef-sec > h3:before { content: ""; width: 6px; height: 20px; background: var(--ef-yellow); box-shadow: 0 0 0 1px var(--ef-ink); }
+.ef-sec > h3 small { margin-left: auto; font-family: var(--ef-num); font-weight: 600; font-size: 14px; letter-spacing: 1px; color: var(--ef-sub); }
+.ef-sec > h3 small.cjk { font-family: var(--ef-cjk); font-weight: 400; letter-spacing: 0; }
+
+/* small parts */
+.ef-tag { display: inline-block; font-size: 13px; padding: 1px 8px; border: 1px solid var(--ef-ink); background: var(--ef-panel); }
+.ef-tag.y { background: var(--ef-yellow); } .ef-tag.d { background: var(--ef-ink); color: #f4f4f0; }
+.ef-rank { display: inline-block; width: 26px; height: 26px; line-height: 26px; text-align: center; font-family: var(--ef-num);
+  font-weight: 700; font-size: 17px; background: var(--ef-panel-2); border: 1px solid var(--ef-line); }
+.ef-rank.r1 { background: var(--ef-yellow); border-color: var(--ef-ink); }
+.ef-rank.r2 { background: var(--ef-silver); color: var(--ef-ink); border-color: var(--ef-ink); } .ef-rank.r3 { background: var(--ef-copper); color: #fff; border-color: var(--ef-ink); }
+.ef-empty { padding: 14px 16px; color: var(--ef-faint); font-size: 16px; }
+.ef-foot { margin-top: 14px; display: flex; justify-content: space-between; align-items: center; gap: 16px; font-size: 13px; color: var(--ef-sub); line-height: 1.6; }
+.ef-foot .mark { font-family: var(--ef-num); font-weight: 600; letter-spacing: 3px; color: var(--ef-ink); white-space: nowrap; }
+.ef-foot .mark:before { content: ""; display: inline-block; width: 18px; height: 8px; margin-right: 8px; vertical-align: 1px;
+  background: repeating-linear-gradient(-45deg, var(--ef-yellow) 0 4px, var(--ef-ink) 4px 8px); }
+/* ---- /zmd抽卡记录 ---- */
+img { display: block; }
+.page { padding: 18px; }
+
+/* header plate */
+.ef-head.gh { padding: 16px 22px 22px 30px; }
+.ef-head.gh .k { font-size: 13px; letter-spacing: 3px; }
+.ef-head.gh .code { top: 16px; right: 22px; font-size: 12px; }
+.ef-head.gh .code b { font-size: 38px; line-height: 1.05; }
+.ef-head.gh .code b small { font-family: var(--ef-cjk); font-size: 16px; font-weight: 700; color: var(--ef-yellow); margin-left: 4px; letter-spacing: 0; }
+.ef-head.gh .code .split { display: flex; justify-content: flex-end; gap: 14px; margin-top: 4px; font-family: var(--ef-cjk);
+  font-size: 12px; letter-spacing: 0; color: #b9b9b2; }
+.ef-head.gh .code .split i { font-style: normal; font-family: var(--ef-num); font-weight: 700; font-size: 18px; color: #f4f4f0; margin-left: 4px; letter-spacing: .3px; }
+.who { display: flex; gap: 14px; align-items: center; margin-top: 10px; }
+.who .avatar { width: 56px; height: 56px; flex: none; border: 1px solid #6a6a64; outline: 3px solid var(--ef-dark);
+  outline-offset: -4px; background: var(--ef-dark-2); }
+.who .avatar img { width: 54px; height: 54px; object-fit: cover; }
+.who h1 { margin-top: 0; font-size: 28px; line-height: 1.15; }
+.who p { margin-top: 3px; font-family: var(--ef-num); font-weight: 600; font-size: 15px; letter-spacing: 1px; color: #b9b9b2; }
+
+/* summary tiles */
+.stats { display: flex; gap: 10px; margin-top: 14px; }
+.stat { flex: 1 1 0; min-width: 0; position: relative; display: flex; flex-direction: column; background: var(--ef-panel);
+  border: 1px solid var(--ef-line); border-top: 3px solid var(--ef-ink); padding: 8px 12px 10px; }
+.stat:after { content: ""; position: absolute; right: 0; top: 0; width: 18px; height: 4px; background: var(--ef-yellow); }
+.stat h4 { display: flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 900; }
+.stat h4:before { content: ""; width: 4px; height: 13px; background: var(--ef-yellow); box-shadow: 0 0 0 1px var(--ef-ink); }
+.stat .big { margin-top: 4px; font-family: var(--ef-num); font-weight: 700; font-size: 34px; line-height: 1.05; letter-spacing: .3px; }
+.stat .big small { font-family: var(--ef-cjk); font-size: 13px; font-weight: 400; color: var(--ef-sub); margin-left: 3px; }
+.stat .kv { display: flex; gap: 8px; margin-top: 6px; }
+.stat .kv > div { flex: 1 1 0; }
+.stat .kv b { display: block; font-family: var(--ef-num); font-weight: 700; font-size: 20px; line-height: 1.1; white-space: nowrap; }
+.stat .kv b i { font-style: normal; color: var(--ef-faint); margin: 0 2px; }
+.stat .kv small { display: block; font-size: 11px; color: var(--ef-sub); white-space: nowrap; }
+.six { display: inline-block; background: var(--ef-yellow); padding: 0 4px; }
+.spook { color: var(--ef-red); }
+.pity-meter { margin-top: auto; padding-top: 8px; }
+.pity-meter .pl { display: flex; justify-content: space-between; align-items: baseline; font-size: 11px; color: var(--ef-sub); margin-bottom: 3px; }
+.pity-meter .pl span:last-child { font-family: var(--ef-num); font-weight: 700; font-size: 15px; color: var(--ef-ink); }
+.meter { height: 7px; background: var(--ef-line-2); border: 1px solid var(--ef-line); }
+.meter u { display: block; height: 100%; background: var(--ef-yellow); box-shadow: inset -1px 0 0 var(--ef-ink); }
+.stat.arsenal .kv { margin-top: 8px; }
+.stat.arsenal .net { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--ef-line-2); }
+.stat.arsenal .net b { font-size: 26px; }
+.stat.arsenal .neg { color: var(--ef-red); }
+
+/* pool columns */
+.cols { display: flex; gap: 10px; align-items: stretch; margin-top: 14px; }
+.col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.col .ef-sec { margin-top: 0; }
+.col > .ef-sec:last-child { flex: 1 1 auto; }
+.ef-sec > h3 { padding: 8px 12px; font-size: 17px; gap: 8px; }
+.ef-sec > h3:before { width: 5px; height: 16px; }
+.ef-sec > h3 small { font-size: 15px; font-weight: 700; color: var(--ef-ink); }
+.ef-sec > h3 small i { font-style: normal; font-family: var(--ef-cjk); font-size: 12px; font-weight: 400; color: var(--ef-sub); margin-left: 2px; }
+.pools { display: flex; flex-direction: column; gap: 10px; padding: 10px; }
+
+/* one pool */
+.pool { background: #fbfbf9; border: 1px solid var(--ef-ink); }
+.pool .banner { aspect-ratio: 1151/146; overflow: hidden; border-bottom: 1px solid var(--ef-ink); background: var(--ef-panel-2); }
+.pool .banner img { width: 100%; height: 100%; object-fit: cover; object-position: center; }
+.pool .ph { position: relative; display: flex; align-items: center; gap: 8px; padding: 7px 8px 7px 14px; background: var(--ef-dark); color: #f4f4f0; }
+.pool .ph:before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: var(--ef-yellow); }
+.pool .pn { flex: 1 1 auto; min-width: 0; }
+.pool .pn b { display: block; font-size: 14px; font-weight: 900; line-height: 1.25; }
+.pool .up { display: flex; align-items: center; gap: 3px; margin-top: 4px; flex-wrap: wrap; }
+.pool .up span { font-family: var(--ef-num); font-weight: 700; font-size: 11px; line-height: 14px; padding: 0 4px; background: var(--ef-yellow); color: var(--ef-ink); }
+.pool .up img { width: 18px; height: 18px; object-fit: cover; background: var(--ef-dark-2); border: 1px solid #6a6a64; }
+.pool .pc { flex: none; display: flex; align-items: baseline; gap: 2px; padding: 1px 7px; background: var(--ef-yellow); color: var(--ef-ink); }
+.pool .pc b { font-family: var(--ef-num); font-weight: 700; font-size: 20px; line-height: 1.1; }
+.pool .pc small { font-size: 11px; }
+.pool .ps { display: flex; border-bottom: 2px solid var(--ef-ink); background: var(--ef-panel); }
+.pool .ps > div { flex: 1 1 0; text-align: center; padding: 5px 4px 4px; }
+.pool .ps > div + div { border-left: 1px solid var(--ef-line-2); }
+.pool .ps b { display: block; font-family: var(--ef-num); font-weight: 700; font-size: 19px; line-height: 1.1; }
+.pool .ps b i { font-style: normal; color: var(--ef-faint); margin: 0 2px; }
+.pool .ps small { display: block; font-size: 11px; color: var(--ef-sub); }
+
+/* record list (newest on top, like upstream) */
+.recs { display: flex; flex-direction: column-reverse; }
+.rec { padding: 4px 8px 5px; border-top: 1px solid var(--ef-line-2); }
+.recs > .rec:last-child { border-top: 0; }
+.rec.multi { background: rgba(255,225,0,.16); }
+.rec.lead { border-left: 4px solid var(--ef-ink); padding-left: 6px; }
+.rec.free { border-left: 3px dashed var(--ef-sub); padding-left: 7px; }
+.rec .grp { margin-bottom: 3px; }
+.rec .grp span { display: inline-block; font-size: 11px; font-weight: 700; line-height: 15px; padding: 0 6px; background: var(--ef-ink); color: var(--ef-yellow); }
+.rec .grp.free span { background: var(--ef-panel); color: var(--ef-ink); border: 1px dashed var(--ef-ink); line-height: 13px; }
+.rr { display: flex; gap: 8px; align-items: flex-start; }
+.ra { flex: none; width: 32px; display: flex; flex-direction: column; align-items: center; }
+.ra .av { width: 32px; height: 32px; object-fit: cover; background: var(--ef-panel-2); border: 1px solid var(--ef-ink); border-bottom: 3px solid var(--ef-yellow); }
+.ra .av.box { display: flex; align-items: center; justify-content: center; background: var(--ef-panel-2); border-bottom: 1px solid var(--ef-ink);
+  font-family: var(--ef-num); font-weight: 700; font-size: 11px; letter-spacing: .5px; color: var(--ef-sub); }
+.ra .date { margin-top: 1px; font-family: var(--ef-num); font-weight: 600; font-size: 11px; line-height: 12px; color: var(--ef-sub); letter-spacing: .2px; }
+.rb { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.rn { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.rn b { font-size: 14px; line-height: 17px; font-weight: 900; margin-right: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.t { display: inline-block; font-size: 10px; line-height: 13px; padding: 0 4px; border: 1px solid var(--ef-ink); background: var(--ef-panel); color: var(--ef-ink); white-space: nowrap; }
+.t.up { background: var(--ef-yellow); font-family: var(--ef-num); font-weight: 700; font-size: 11px; }
+.t.spk { background: var(--ef-ink); color: #f4f4f0; }
+.t.new { font-family: var(--ef-num); font-weight: 700; font-size: 11px; }
+.t.free { border-style: dashed; font-family: var(--ef-num); font-weight: 700; font-size: 11px; }
+.t.lucky { border-color: var(--ef-green); color: var(--ef-green); }
+.t.unlucky { border-color: var(--ef-red); color: var(--ef-red); }
+
+/* pity bar: yellow = early, silver = mid (>=45), black with hazard cap = late (>=70) */
+.pity { height: 17px; display: flex; align-items: center; border: 1px solid var(--ef-ink); }
+.pity span { font-family: var(--ef-num); font-weight: 700; font-size: 14px; line-height: 15px; padding: 0 5px; white-space: nowrap; color: var(--ef-ink); }
+.green-stripe-bar { background: var(--ef-yellow); }
+.yellow-stripe-bar { background: var(--ef-silver); }
+.red-stripe-bar { background: repeating-linear-gradient(-45deg, var(--ef-yellow) 0 4px, var(--ef-ink) 4px 8px) right / 16px 100% no-repeat, var(--ef-ink); }
+.red-stripe-bar span { color: var(--ef-yellow); }
+.free-bar { width: 100%; height: 17px; display: flex; align-items: center; border: 1px dashed var(--ef-sub); background: var(--ef-panel-2); }
+.free-bar span { font-size: 11px; font-weight: 700; padding: 0 6px; color: var(--ef-sub); white-space: nowrap; }
+
+.fives { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 1px; }
+.fives div { position: relative; }
+.fives img { width: 21px; height: 21px; object-fit: cover; background: var(--ef-panel-2); border: 1px solid var(--ef-line); }
+.fives span { position: absolute; right: 0; bottom: 0; min-width: 10px; height: 10px; line-height: 10px; text-align: center;
+  font-family: var(--ef-num); font-weight: 700; font-size: 9px; background: var(--ef-ink); color: #f4f4f0; }
+
+.ef-foot { margin-top: 12px; }
+    </style>
+</head>
+
+<body class="ef">
+    <div class="page" style="min-width: {{ ef_gacha_min_width }}px;">
+
+        {# ═══════════════════ 上半部分：账号信息 + 统计数据 ═══════════════════ #}
+
+        {# 账号信息横条 #}
+        <div class="ef-head gh">
+            <div class="code">
+                TOTAL<b>{{ record.total_pulls }}<small>抽</small></b>
+                <div class="split">
+                    <span>角色池<i>{{ record.char_total_pulls }}</i></span>
+                    <span>武器池<i>{{ record.weapon_total_pulls }}</i></span>
+                </div>
+            </div>
+            <div class="k">Endfield · Headhunting Record</div>
+            <div class="who">
+                <div class="avatar"><img src="{{ avatar_url }}" alt="avatar"></div>
+                <div>
+                    <h1>{{ character.nickname }}</h1>
+                    <p>UID: {{ character.role_id }}</p>
+                </div>
+            </div>
+        </div>
+
+        {# 统计卡片 - 均等宽度 #}
+        <div class="stats">
+                {# 限定池统计 #}
+                <div class="stat">
+                    <h4>限定池</h4>
+                    <div class="big">{{ record.special_total_pulls }}<small>抽</small></div>
+                    <div class="kv">
+                        <div>
+                            <b><span class="six">{{ record.special_total_six }}</span><i>/</i><span class="spook">{{ record.special_total_spook }}</span></b>
+                            <small>6★/歪</small>
+                        </div>
+                        <div>
+                            <b>{{ "%.1f"|format(record.special_up_avg) if record.special_up_count > 0 else "-" }}</b>
+                            <small>UP平均</small>
+                        </div>
+                    </div>
+                    {# 限定池跨池小保底进度条 #}
+                    <div class="pity-meter">
+                        <div class="pl">
+                            <span>小保底</span>
+                            <span>{{ record.special_pity }}/80</span>
+                        </div>
+                        <div class="meter"><u style="width: {{ (record.special_pity / 80 * 100) | int }}%;"></u></div>
+                    </div>
+
+                </div>
+
+                {# 武器池统计 #}
+                <div class="stat">
+                    <h4>武器池</h4>
+                    <div class="big">{{ record.weapon_total_pulls }}<small>抽</small></div>
+                    <div class="kv">
+                        <div>
+                            <b><span class="six">{{ record.weapon_total_six }}</span><i>/</i><span class="spook">{{ record.weapon_total_spook }}</span></b>
+                            <small>6★/歪</small>
+                        </div>
+                        <div>
+                            <b>{{ "%.1f"|format(record.weapon_up_avg) if record.weapon_up_count > 0 else "-" }}</b>
+                            <small>UP平均</small>
+                        </div>
+                    </div>
+                    {# 武器池保底进度条 #}
+                    <div class="pity-meter">
+                        <div class="pl">
+                            <span>保底</span>
+                            <span>{{ record.weapon_pity }}/80</span>
+                        </div>
+                        <div class="meter"><u style="width: {{ (record.weapon_pity / 80 * 100) | int }}%;"></u></div>
+                    </div>
+                </div>
+
+                {# 联合寻访统计 #}
+                {% if record.joint_pools %}
+                <div class="stat">
+                    <h4>联合寻访</h4>
+                    <div class="big">{{ record.joint_total_pulls }}<small>抽</small></div>
+                    <div class="kv">
+                        <div>
+                            <b><span class="six">{{ record.joint_total_six }}</span></b>
+                            <small>6★</small>
+                        </div>
+                        <div>
+                            <b>{{ "%.1f"|format(record.joint_six_avg) if record.joint_total_six > 0 else "-" }}</b>
+                            <small>6★平均</small>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                {# 常驻池统计 #}
+                <div class="stat">
+                    <h4>常驻池</h4>
+                    <div class="big">{{ record.standard_total_pulls }}<small>抽</small></div>
+                    <div class="kv">
+                        <div>
+                            <b><span class="six">{{ record.standard_total_six }}</span></b>
+                            <small>6★</small>
+                        </div>
+                        <div>
+                            <b>{{ "%.1f"|format(record.standard_six_avg) if record.standard_total_six > 0 else "-" }}</b>
+                            <small>6★平均</small>
+                        </div>
+                    </div>
+                    {# 常驻池保底进度条 #}
+                    <div class="pity-meter">
+                        <div class="pl">
+                            <span>保底</span>
+                            <span>{{ record.standard_pity }}/80</span>
+                        </div>
+                        <div class="meter"><u style="width: {{ (record.standard_pity / 80 * 100) | int }}%;"></u></div>
+                    </div>
+                </div>
+
+                {# 新手池统计 #}
+                {% if record.beginner_pools %}
+                <div class="stat">
+                    <h4>新手池</h4>
+                    <div class="big">{{ record.beginner_total_pulls }}<small>抽</small></div>
+                    <div class="kv">
+                        <div>
+                            <b><span class="six">{{ record.beginner_pools | sum(attribute='total_six_stars') }}</span></b>
+                            <small>6★</small>
+                        </div>
+                        <div>
+                            <b>{{ record.beginner_total_pulls }}/40</b>
+                            <small>进度</small>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+            {# 武库配额 #}
+            <div class="stat arsenal">
+                <h4>武库配额</h4>
+                <div class="kv">
+                    <div>
+                        <b>{{ record.char_arsenal_quota_earned }}</b>
+                        <small>产出</small>
+                    </div>
+                    <div>
+                        <b>{{ record.weapon_arsenal_quota_consumed }}</b>
+                        <small>消耗</small>
+                    </div>
+                </div>
+                <div class="kv net">
+                    <div>
+                        <b class="{% if record.arsenal_quota_net >= 0 %}pos{% else %}neg{% endif %}">
+                            {{ record.arsenal_quota_net }}
+                        </b>
+                        <small>净值</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {# ═══════════════════ 下半部分：卡池详情 从左到右 ═══════════════════ #}
+        {# 计算可见卡池ID集合（基于 start_index/end_index 对 flat_pools 切片） #}
+        {% if start_index is not none or end_index is not none %}
+        {% set visible_ids = record.get_visible_pool_ids(start_index, end_index) %}
+        {% else %}
+        {% set visible_ids = none %}
+        {% endif %}
+
+        <div class="cols">
+            {{ ef_pool_column(record.special_pools, "限定池", "#e17055", gacha_data=record, visible_pool_ids=visible_ids) }}
+            {{ ef_pool_column(record.weapon_pools, "武器池", "#fdcb6e", gacha_data=record, visible_pool_ids=visible_ids) }}
+            {{ ef_pool_column(record.joint_pools, "联合寻访", "#c084fc", gacha_data=record, visible_pool_ids=visible_ids) }}
+
+            {# 新手池 + 常驻池合并列 #}
+            {% if visible_ids is not none %}
+            {% set vis_beginner = record.beginner_pools | selectattr('pool_id', 'in', visible_ids) | list %}
+            {% set vis_standard = record.standard_pools | selectattr('pool_id', 'in', visible_ids) | list %}
+            {% else %}
+            {% set vis_beginner = record.beginner_pools %}
+            {% set vis_standard = record.standard_pools %}
+            {% endif %}
+
+            {% if vis_standard or vis_beginner %}
+            <div class="col">
+                {% if vis_beginner %}
+                <div class="ef-sec">
+                    <h3>新手池<small>{{ vis_beginner | sum(attribute='total_pulls') }}<i>抽</i></small></h3>
+                    <div class="pools">
+                        {% for pool in vis_beginner %}
+                        {{ ef_pool_card(pool, "新手池", "#74b9ff", gacha_data=record) }}
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+
+                {% if vis_standard %}
+                <div class="ef-sec">
+                    <h3>常驻池<small>{{ vis_standard | sum(attribute='total_pulls') }}<i>抽</i></small></h3>
+                    <div class="pools">
+                        {% for pool in vis_standard %}
+                        {{ ef_pool_card(pool, "常驻池", "#00b894", gacha_data=record) }}
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="ef-foot"><span>Generated by nonebot-plugin-skland</span><span class="mark">PRIESTESS SYSTEM</span></div>
+    </div>
+</body>
+
+</html>

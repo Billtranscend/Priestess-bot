@@ -1,0 +1,27 @@
+# systemd unit for the NoneBot side. Replace /opt/priestess-bot and the user/group, then:
+#   sudo cp deploy/nonebot.service.example /etc/systemd/system/nonebot.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now nonebot
+[Unit]
+Description=NoneBot2 OneBot V11 Service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=bot
+Group=bot
+WorkingDirectory=/opt/priestess-bot
+Environment=PYTHONUNBUFFERED=1
+Environment=ENVIRONMENT=prod
+ExecStart=/opt/priestess-bot/.venv/bin/python /opt/priestess-bot/bot.py
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/opt/priestess-bot
+
+[Install]
+WantedBy=multi-user.target

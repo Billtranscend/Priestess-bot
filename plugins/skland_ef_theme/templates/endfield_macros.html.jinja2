@@ -1,0 +1,104 @@
+{#- Restyled from endfield_macros.html.jinja2 of nonebot-plugin-skland 0.7.1 (https://github.com/FrostN0v0/nonebot-plugin-skland), MIT License, Copyright (c) 2025 FrostN0v0. See THIRD_PARTY_NOTICES.md. -#}
+{# 终末地干员卡片宏 #}
+{% macro endfield_char_card(char) %}
+{# 获取稀有度边框颜色 #}
+{% set rarity_color = char.charData.rarity.key | get_rarity_color %}
+{% set profession_icon = char.charData.profession.key | get_profession_icon %}
+{% set property_icon = char.charData.property.key | get_property_icon %}
+
+<div class="op">
+  <div class="op-art">
+    {# 角色半身像 #}
+    <img src="{{ char.charData.avatarRtUrl }}" class="portrait" alt="{{ char.charData.name }}" />
+
+    {# 左上角职业和属性图标 #}
+    <div class="op-icons">
+      <img src="../images/endfield/{{ profession_icon }}" alt="profession" />
+      <img src="../images/endfield/{{ property_icon }}" alt="property" />
+    </div>
+
+    {# 右上角四块装备区域 #}
+    <div class="op-equips">
+      {# 装备1: bodyEquip #}
+      {{ equip_slot(char.bodyEquip) }}
+      {# 装备2: armEquip #}
+      {{ equip_slot(char.armEquip) }}
+      {# 装备3: firstAccessory #}
+      {{ equip_slot(char.firstAccessory) }}
+      {# 装备4: secondAccessory #}
+      {{ equip_slot(char.secondAccessory) }}
+    </div>
+
+    {# 底部：武器 + 潜能 + 等级与突破阶段 #}
+    <div class="op-bar">
+      <div class="op-wpn" style="border-bottom-color: {{ char.weapon.weaponData.rarity.key | get_rarity_color }}">
+        {% if char.weapon and char.weapon.weaponData.iconUrl %}
+        <img src="{{ char.weapon.weaponData.iconUrl }}" alt="weapon" />
+        {% endif %}
+        {# 武器精炼等级 #}
+        {% if char.weapon and char.weapon.refineLevel > 0 %}
+        <span>{{ char.weapon.refineLevel }}</span>
+        {% endif %}
+      </div>
+
+      {# 命座图标 - 0级不显示图标 #}
+      {% if char.potentialLevel > 0 %}
+      <img src="../images/endfield/potential/potential_{{ char.potentialLevel }}.png" class="op-pot" alt="potential" />
+      {% endif %}
+
+      <div class="op-lv">
+        <small>Lv.</small><b>{{ char.level }}</b>
+        <img src="../images/endfield/evolve_phases/phase-{{ char.evolvePhase }}.png" alt="evolve" />
+      </div>
+    </div>
+  </div>
+
+  {# 底部名称栏 #}
+  <div class="op-name" style="border-bottom-color: {{ rarity_color }}">{{ char.charData.name }}</div>
+</div>
+{% endmacro %}
+
+
+{# 装备槽宏 - 仅在有装备时渲染 #}
+{% macro equip_slot(equip) %}
+{% if equip and equip.equipData and equip.equipData.iconUrl %}
+{% set equip_color = equip.equipData.rarity.key | get_equip_rarity_color %}
+<div class="eq" style="border-right-color: {{ equip_color }}">
+  <img src="{{ equip.equipData.iconUrl }}" alt="equip" />
+</div>
+{% endif %}
+{% endmacro %}
+
+
+{# 据点卡片宏 #}
+{% macro domain_card(domain) %}
+{% set domain_info = domain.domainId | get_domain_info %}
+<div class="domain">
+  <div class="dh">
+    <b>{{ domain_info.name }}</b>
+    <span class="lv">Lv.{{ domain.level }}</span>
+    {% if domain.moneyMgr %}<span class="money">{{ domain.moneyMgr.count | format_money_wan }} / {{ domain.moneyMgr.total |
+      format_money_wan }}</span>{% endif %}
+  </div>
+  {# 聚落列表 #}
+  {% for settlement in domain.settlements %}
+  <div class="settle">
+    <div class="sl">
+      {% if settlement.officerCharAvatar %}
+      <img src="{{ settlement.officerCharAvatar }}" class="officer" alt="officer" />
+      {% else %}
+      <div class="officer"></div>
+      {% endif %}
+      <div class="sn">
+        <small>Lv.{{ settlement.level }}</small>
+        <span>{{ settlement.name }}</span>
+      </div>
+      <div class="sv">{{ settlement.remainMoney | format_money_wan }} / {{ settlement.moneyMax | format_money_wan }}</div>
+    </div>
+    {% set money_percent = ((settlement.remainMoney | int) / (settlement.moneyMax | int) * 100) | int if
+    (settlement.moneyMax | int) > 0 else 0 %}
+    <div class="bar"><u style="width: {{ money_percent }}%"></u></div>
+  </div>
+  {% endfor %}
+</div>
+{% endmacro %}

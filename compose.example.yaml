@@ -1,0 +1,27 @@
+# NapCat (QQ protocol side) in Docker. Copy to compose.yaml and adjust.
+#
+# - `platform`: linux/arm64 for ARM servers (tested), linux/amd64 for x86_64.
+# - NAPCAT_UID / NAPCAT_GID: the uid/gid of the user that owns this directory (`id -u`, `id -g`).
+# - Host networking lets NapCat reach NoneBot on 127.0.0.1:8080 and keeps its WebUI on localhost.
+# - The pErithacus media mount must use the same absolute path inside and outside the container,
+#   because the bot hands NapCat absolute file paths. Replace /opt/priestess-bot with your checkout path.
+services:
+  napcat:
+    image: mlikiowa/napcat-docker:latest
+    platform: linux/arm64
+    container_name: napcat
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      NAPCAT_UID: "1000"
+      NAPCAT_GID: "1000"
+    volumes:
+      - ./napcat/qq:/app/.config/QQ
+      - ./napcat/config:/app/napcat/config
+      - ./napcat/plugins:/app/napcat/plugins
+      - type: bind
+        source: /opt/priestess-bot/data/nonebot_plugin_perithacus/media
+        target: /opt/priestess-bot/data/nonebot_plugin_perithacus/media
+        read_only: true
+        bind:
+          create_host_path: false
