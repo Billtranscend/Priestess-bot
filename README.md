@@ -49,6 +49,9 @@ A QQ group bot for Arknights: Endfield / Arknights communities, built on NoneBot
 - 高难关卡（战争回响、影拓丰碑）：关卡攻略卡（机制、敌人数值与抗性、通关阵容、B 站推荐视频）、
   群内竞速榜、全体绑定玩家的干员出场率
 - 理智查询，理智回满时在群内提醒
+- 活动日历与活动开启通知（终末地、明日方舟）：`/zmd活动`、`/mrfz活动` 列出正在开放和即将开启的活动、
+  卡池及截止时间；有活动开启时在各群自动发送一张通知图（不 @全体，夜间开启的活动在早上统一通知）。
+  明日方舟的数据合并自游戏数据表与 PRTS Wiki 的公开接口，停机维护日以公告的开启时间为准
 - 群周报（每周日 19:00）：每周任务、本群竞速前三、关卡轮换、活动与卡池倒计时；
   机器人是管理员的群会附带 @全体成员
 - 森空岛账号体检（每周一 04:00）：自动清理登录失效、或全部角色都无法使用的绑定，删除前自动备份
@@ -71,7 +74,7 @@ A QQ group bot for Arknights: Endfield / Arknights communities, built on NoneBot
 | Docker | 29.x | 仅用于运行 NapCat |
 | 内存 | 建议 2 GB 以上 | 出图使用无头 Chromium |
 | 中文字体 | 文泉驿正黑（`fonts-wqy-zenhei`） | 图片中的中文字体；数字与英文使用仓库内置的 Barlow Condensed |
-| 网络 | 可访问 QQ、森空岛、AKEData、哔哩哔哩、GitHub | 部分资源从 GitHub 下载 |
+| 网络 | 可访问 QQ、森空岛、AKEData、哔哩哔哩、GitHub、PRTS Wiki | 部分资源从 GitHub 下载 |
 
 Windows 与 macOS 未测试：systemd 单元、字体安装方式和部分路径假设都以 Linux 为准。
 
@@ -238,6 +241,16 @@ NapCat 以反向 WebSocket 客户端连入。动态推送可另外搭配
 | `/套装名`、`/装备名` | 装备套装资料卡：3 件套效果、各件装备属性（未精锻与精锻满级）、成员使用统计，例如 `/险关`、`/潮涌手甲` |
 | `/干员名配装` | 同 `/干员名`，干员卡内含群友配装统计 |
 
+### 活动日历
+
+| 指令 | 作用 |
+|---|---|
+| `/zmd活动`（`/终末地活动`、`/zmd日历` 等） | 终末地正在开放和即将开启的活动、卡池及截止时间 |
+| `/mrfz活动`（`/明日方舟活动`、`/粥活动`、`/舟日历` 等） | 明日方舟，同上 |
+| `/活动`、`/日历` | 两款游戏各发一张 |
+
+游戏名与「活动 / 日历 / 活动日历 / 活动列表」之间可以有空格或「的」。时间均为北京时间。
+
 ### 高难关卡
 
 | 指令 | 作用 |
@@ -283,6 +296,8 @@ NapCat 以反向 WebSocket 客户端连入。动态推送可另外搭配
 | 每天 06:00 | 检查机器人在哪些群是管理员 | `weekly_report` |
 | 每 10 分钟 | 理智回满检查 | `sanity_reminder` |
 | 定期 | 检查 AKEData 数据版本 | `endfield_wiki` |
+| 每 5 分钟 | 检查两款游戏是否有活动开启，有则向所有群发送通知图（0–8 点开启的在 8 点发送） | `game_calendar` |
+| 每 30 分钟 | 检查明日方舟游戏数据版本，每小时查询一次 PRTS Wiki 已登记的活动 | `game_calendar` |
 | 每周日 19:00 | 向所有群发送周报 | `weekly_report` |
 | 每周一 04:00 | 森空岛账号体检 | `skland_health` |
 
@@ -308,6 +323,7 @@ plugins/
   skland_gacha_rank/           欧非榜
   heybox_import/               从小黑盒导入早期抽卡记录
   weekly_report/               群周报
+  game_calendar/               终末地与明日方舟的活动日历、活动开启通知
   skland_health/               账号体检与签到网络重试
   sanity_reminder/             理智查询与提醒
   skl_help/                    帮助图
@@ -380,6 +396,8 @@ plugins/
 | [jpt/barlow](https://github.com/jpt/barlow) | Barlow Condensed 字体（`plugins/ef_theme/fonts/`） | SIL OFL 1.1 |
 | [AKEData](https://www.akedata.wiki/) | 终末地解包数据：干员、武器、关卡、敌人、活动与卡池时间 | 见站点说明 |
 | [小黑盒](https://www.xiaoheihe.cn/) | 终末地「抽卡分析」：早期抽卡记录的导入来源 | 见站点说明 |
+| [yuanyan3060/ArknightsGameResource](https://github.com/yuanyan3060/ArknightsGameResource) | 明日方舟游戏数据表：活动与卡池时间 | 见仓库说明 |
+| [PRTS Wiki](https://prts.wiki/) | 明日方舟已公布活动的时间（仅使用其公开 API）、卡池 UP 干员 | CC BY-NC-SA 4.0 |
 
 第三方代码与字体的版权声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
