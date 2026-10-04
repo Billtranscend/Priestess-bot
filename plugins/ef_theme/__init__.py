@@ -93,6 +93,21 @@ def shrink(data: bytes, scale: float, quality: int = 72, subsampling: int = 2) -
     return out.getvalue() if out.tell() < len(data) else data
 
 
+def to_webp(data: bytes, quality: int = 55) -> bytes:
+    """Re-encode a rendered PNG as WebP: about 40% of the bytes of a JPEG that looks as sharp.
+
+    QQ uploads from this host drop to ~15 KB/s in the evening, so every 100 KB costs several seconds.
+    """
+    from io import BytesIO
+
+    from PIL import Image
+
+    with Image.open(BytesIO(data)) as image:
+        out = BytesIO()
+        image.convert("RGB").save(out, "WEBP", quality=quality, method=4)
+    return out.getvalue()
+
+
 def fonts_css() -> str:
     """@font-face rules only (absolute file:// URLs of this checkout), for static templates."""
     return _FONTS

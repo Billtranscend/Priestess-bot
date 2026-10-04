@@ -46,11 +46,12 @@ __plugin_meta__ = PluginMetadata(
 )
 
 WIDTH = 1320
-# Sharpness of the picture. Measured 2026-10-04 for 32 operators (fetch 2-4.5 s + render ~3 s + upload):
-#   SCALE 1 -> 1320 px, ~0.7 MB, ~11 s in total;  1.25 -> 1650 px, ~0.9 MB, ~12 s;
-#   1.5 -> 1980 px, ~1.2 MB, ~13 s;  2 -> 2640 px, ~1.5-1.7 MB, ~15 s or more.
+# Sharpness of the picture, sent as WebP. Measured 2026-10-04 for 32 operators:
+#   SCALE 1 -> 1320 px, ~280 KB;  1.25 -> 1650 px, ~380 KB;  1.5 -> 1980 px, ~470 KB (QUALITY 55).
+# A JPEG as sharp as the 1.5x WebP was 1.2 MB. Upload to QQ runs at 150-230 KB/s by day but only
+# ~15-20 KB/s in the evening, so the size decides the wait: fetch 2-4.5 s + render ~3.5 s + size / speed.
 SCALE = 1.5
-QUALITY = 72
+QUALITY = 55
 REACTION_PROCESSING, REACTION_DONE, REACTION_FAIL = "66", "144", "10060"
 RES_IMAGES = Path(nonebot_plugin_skland.__file__).parent / "resources" / "images" / "endfield"
 
@@ -323,7 +324,7 @@ async def _(event: MessageEvent, user_session: UserSession, session: async_scope
         html, matched, total_skills = _render(card)
         logger.info(f"Endfield roster: {len(card.chars)} operators, skill levels matched {matched}/{total_skills}")
         image = await html_to_pic(html, type="png", device_scale_factor=SCALE, viewport={"width": WIDTH, "height": 800})
-        image = await asyncio.to_thread(ef_theme.shrink, image, 1, QUALITY, 0)  # one JPEG pass, 4:4:4
+        image = await asyncio.to_thread(ef_theme.to_webp, image, QUALITY)
         await UniMessage.image(raw=image).send()
         await session.commit()
     except MatcherException:

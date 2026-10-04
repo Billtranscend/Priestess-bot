@@ -55,13 +55,19 @@ async def _queue_once_joined(bot: Bot, group_id: int) -> None:
     logger.warning("Group onboarding: an accepted invitation did not lead to a join")
 
 
-invited = on_request(priority=5, block=False)
+async def _is_invitation(event: GroupRequestEvent) -> bool:
+    return event.sub_type == "invite"
+
+
+async def _bot_joined(event: GroupIncreaseNoticeEvent) -> bool:
+    return event.user_id == event.self_id
+
+
+invited = on_request(rule=_is_invitation, priority=5, block=False)
 
 
 @invited.handle()
 async def _(bot: Bot, event: GroupRequestEvent) -> None:
-    if event.sub_type != "invite":
-        return
     await event.approve(bot)
     logger.info("Group onboarding: invitation accepted")
     task = asyncio.get_running_loop().create_task(_queue_once_joined(bot, event.group_id))
@@ -69,10 +75,9 @@ async def _(bot: Bot, event: GroupRequestEvent) -> None:
     task.add_done_callback(_tasks.discard)
 
 
-joined = on_notice(priority=5, block=False)
+joined = on_notice(rule=_bot_joined, priority=5, block=False)
 
 
 @joined.handle()
 async def _(event: GroupIncreaseNoticeEvent) -> None:
-    if event.user_id == event.self_id:
-        queue_subscriptions(event.group_id)
+    queue_subscriptions(event.group_id)
