@@ -47,6 +47,7 @@ from plugins.endfield_wiki import data as wiki_data
 from plugins.endfield_wiki.lookup import normalize, to_pinyin
 
 from .bili import BiliSearch
+from .builds import BuildStore
 from .echoes import ECHO_SCHEMA, EchoStore, speed_ranking, team_stats, usage_rates
 
 __plugin_meta__ = PluginMetadata(
@@ -60,6 +61,7 @@ DATA_DIR = store.get_plugin_data_dir()
 DATA_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
 bili = BiliSearch(DATA_DIR / "videos.json")
 echo_store = EchoStore(DATA_DIR / "echoes.json", DATA_DIR / "optout.json")
+build_store = BuildStore(DATA_DIR / "builds.json")  # read by endfield_wiki for the build statistics on its cards
 CN = timezone(timedelta(hours=8))
 WIDTH = 1100
 REACTION_PROCESSING, REACTION_DONE, REACTION_FAIL = "66", "144", "10060"
@@ -208,8 +210,8 @@ async def _(event: MessageEvent, arg: Message = CommandArg()) -> None:
 
 @collect_now.handle()
 async def _() -> None:
-    await collect_now.send("开始收集战争回响通关记录，约需几分钟…")
-    stats = await echo_store.collect()
+    await collect_now.send("开始收集战争回响通关记录和干员配装，约需半小时…")
+    stats = await echo_store.collect(build_store)
     await collect_now.finish(f"收集完成：{stats}")
 
 
@@ -703,9 +705,11 @@ async def _(bot: Bot, event: MessageEvent, arg: Message = CommandArg()) -> None:
 
 @scheduler.scheduled_job("cron", hour="5,17", minute=30, timezone="Asia/Shanghai", id="endfield_guide_collect")
 async def _collect() -> None:
+    """Clears twice a day; operators' equipment only with the morning run (or when there is none yet, or it is outdated)."""
     started = time.time()
+    with_builds = datetime.now(timezone(timedelta(hours=8))).hour < 12 or not build_store.current()
     try:
-        stats = await echo_store.collect()
+        stats = await echo_store.collect(build_store if with_builds else None)
         logger.info(f"War Echoes clears collected in {time.time() - started:.0f}s: {stats}")
     except Exception as e:
         logger.warning(f"War Echoes collection failed: {type(e).__name__}")
@@ -720,7 +724,7 @@ async def _first_collect() -> None:
 
     Existing (older) data keeps serving the boards until the new collection finishes.
     """
-    if echo_store.data_file.exists() and echo_store.load().get("schema") == ECHO_SCHEMA:
+    if echo_store.data_file.exists() and echo_store.load().get("schema") == ECHO_SCHEMA and build_store.current():
         return
 
     async def run() -> None:

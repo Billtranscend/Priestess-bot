@@ -1,4 +1,4 @@
-"""Resolve player input like "提丰", "提丰专武" or "寒夜" to an operator or weapon.
+"""Resolve player input like "提丰", "提丰专武", "寒夜" or "险关" to an operator, weapon or equipment set.
 
 Matching is deliberately conservative because every "/xxx" message reaches this
 plugin: exact names/aliases first, then a unique prefix, then a close typo match.
@@ -18,6 +18,7 @@ except ImportError:  # pragma: no cover
     pinyin = None
 
 SIGNATURE_SUFFIXES = ("专武", "专属武器")
+BUILD_SUFFIXES = ("推荐装备", "配装", "装备", "套装")  # "/庄方宜配装": the operator card, which carries the build statistics
 MIN_PREFIX = 2
 FUZZY_CUTOFF = 0.8
 MAX_CANDIDATES = 6
@@ -51,10 +52,10 @@ def normalize(text: str) -> str:
 
 @dataclass
 class Result:
-    kind: str = ""  # "operator" | "weapon" | "no_signature" | "candidates"
+    kind: str = ""  # "operator" | "weapon" | "equip_set" | "no_signature" | "candidates"
     id: str = ""
     owner: str = ""  # operator id when the query asked for a signature weapon
-    note: str = ""
+    note: str = ""  # weapon: why this one was picked; equip_set: the piece that was asked for
     candidates: list[str] = field(default_factory=list)
 
 
@@ -81,6 +82,14 @@ class Resolver:
             self.labels[("weapon", wid)] = name
             for key in (name, wp["eng"], *aliases.get("weapons", {}).get(name, [])):
                 self._add(key, ("weapon", wid))
+        self.pieces: dict[str, str] = {}  # normalized piece name -> display name; a piece opens its set's card
+        for sid, equip_set in index.get("equip_sets", {}).items():
+            self.labels[("equip_set", sid)] = equip_set["name"]
+            for key in (equip_set["name"], *aliases.get("equip_sets", {}).get(equip_set["name"], [])):
+                self._add(key, ("equip_set", sid))
+            for piece in equip_set["pieces"]:
+                self._add(piece["name"], ("equip_set", sid))
+                self.pieces.setdefault(normalize(piece["name"]), piece["name"])
         self.alias_cfg = aliases.get("operators", {})
         self.weapon_by_name = name_to_wp
 
@@ -134,4 +143,12 @@ class Resolver:
                 if rec:
                     return Result(kind="weapon", id=rec, owner=found.id, note="（非专武，推荐武器）")
                 return Result(kind="no_signature", id=found.id)
-        return self._find(query, ("operator", "weapon"))
+        found = self._find(query, ("operator", "weapon", "equip_set"))
+        if found is None:
+            for suffix in BUILD_SUFFIXES:
+                if query.endswith(suffix) and len(query) > len(suffix):
+                    owner = self._find(query[: -len(suffix)], ("operator",))
+                    return owner if owner and owner.kind in ("operator", "candidates") else None
+        elif found.kind == "equip_set" and self.keys.get(query) == ("equip_set", found.id):
+            found.note = self.pieces.get(query, "")
+        return found

@@ -24,6 +24,8 @@ from nonebot_plugin_skland.schemas import CRED
 from nonebot_plugin_user.models import Bind
 from sqlalchemy import select
 
+from .builds import CARD_URL, BuildStore, extract
+
 WAR_ECHOES_URL = "https://zonai.skland.com/api/v1/game/endfield/card/war-echoes"
 INDIE_HARD_URL = "https://zonai.skland.com/api/v1/game/endfield/card/indie-hard"  # 影拓丰碑
 DIFFICULTY_FIELDS = (("normalDungeon", "普通"), ("hardDungeon", "困难"), ("cruelDungeon", "残酷"))
@@ -71,12 +73,16 @@ class EchoStore:
             if data["members"].pop(qq, None) is not None:
                 self._save(data)
 
-    async def collect(self) -> dict[str, int]:
-        """Fetch every bound, non-opted-out member once; returns counters for logging."""
+    async def collect(self, builds: BuildStore | None = None) -> dict[str, int]:
+        """Fetch every bound, non-opted-out member once; returns counters for logging.
+
+        With `builds`, each member's card is read as well and their operators' equipment is stored there.
+        """
         async with self.lock:
             optout = self.optout()
             data = self.load()
             stats = Counter()
+            build_members = builds.load().get("members") or {} if builds else {}
             async with get_session() as session:
                 # Plain values: the per-member commit below expires ORM objects, and lazily
                 # reloading them outside an await raises MissingGreenlet.
@@ -118,12 +124,22 @@ class EchoStore:
                                 stats["dropped"] += data["members"].pop(qq, None) is not None
                                 break
                             await asyncio.sleep(REQUEST_GAP * 2)
+                    if builds is not None and qq in data["members"]:
+                        try:  # a failure keeps the member's previous snapshot
+                            await asyncio.sleep(REQUEST_GAP)
+                            card = await _fetch(CARD_URL, user, char)
+                            build_members[qq] = {"ts": time.time(), "chars": extract(card.get("detail") or {})}
+                            stats["builds"] += 1
+                        except Exception as e:
+                            stats[f"builds_{type(e).__name__}"] += 1
                     # Persist refreshed tokens now: a write left pending across the whole run would hold
                     # SQLite's write lock for minutes and make binding / gacha updates fail.
                     await session.commit()
                     await asyncio.sleep(REQUEST_GAP)
             data["schema"] = ECHO_SCHEMA
             self._save(data)
+            if builds is not None:  # members dropped above (unbound, opted out, failing) leave the build statistics too
+                builds.save({qq: member for qq, member in build_members.items() if qq in data["members"]})
             return dict(stats)
 
 

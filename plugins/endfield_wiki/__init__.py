@@ -1,12 +1,13 @@
-"""Endfield operator / weapon lookup backed by AKEData, with data-update notices.
+"""Endfield operator / weapon / equipment set lookup backed by AKEData, with data-update notices.
 
-/<干员或昵称>       operator card, e.g. /提丰 /plk /小庄
+/<干员或昵称>       operator card, e.g. /提丰 /plk /小庄 (also /提丰配装: the card carries members' builds)
 /<干员或昵称>专武   signature weapon card, e.g. /提丰专武
 /<武器或简称>       weapon card, e.g. /寒夜幽影 /寒夜
+/<套装或装备名>     equipment set card, e.g. /险关 /潮涌手甲
 /资料库更新          (SUPERUSER) force a data sync now
 
 The lookup matcher runs after every other command and only claims a message
-when the text resolves to a known operator or weapon.
+when the text resolves to a known operator, weapon or equipment set.
 """
 
 from __future__ import annotations
@@ -136,6 +137,16 @@ async def _lookup_rule(event: MessageEvent, state: T_State) -> bool:
     return True
 
 
+def _builds() -> tuple[dict, int]:
+    """Members' build statistics kept by endfield_guide (empty when that plugin or its data is missing)."""
+    with contextlib.suppress(Exception):
+        from plugins import endfield_guide
+        from plugins.endfield_guide import builds
+
+        return endfield_guide.build_store.stats(endfield_guide.echo_store.optout()), builds.MIN_SAMPLE
+    return {"operators": {}, "sets": {}}, 3
+
+
 lookup = on_message(rule=_lookup_rule, priority=95, block=True)
 
 
@@ -158,11 +169,23 @@ async def _(state: T_State) -> None:
             weapon = index["weapons"][result.id]
             icon = await _cached_image(data.weapon_icon_url(weapon["icon"]), f"wpn_{weapon['icon']}.png")
             html = render.weapon_html(weapon, icon, version, result.note)
+        elif result.kind == "equip_set":
+            equip_set = index["equip_sets"][result.id]
+            stats, min_sample = _builds()
+            srcs = await asyncio.gather(*(_cached_image(data.equip_icon_url(p["icon"]), f"eq_{p['icon']}.png") for p in equip_set["pieces"]))
+            icons = {p["id"]: src for p, src in zip(equip_set["pieces"], srcs)}
+            html = render.equip_set_html(equip_set, icons, version, stats["sets"].get(equip_set["name"]), min_sample, result.note)
         else:
             op = index["operators"][result.id]
             icon = await _cached_image(data.char_icon_url(op["id"]), f"chr_{op['id']}.png")
             sig = index["weapons"].get(op.get("signature_weapon") or "", {}).get("name", "")
-            html = render.operator_html(op, icon, version, sig)
+            stats, min_sample = _builds()
+            builds = stats["operators"].get(op["name"])
+            items = index.get("equip_items", {})
+            names = [p["name"] for p in builds["typical"] if p["name"] in items] if builds else []
+            srcs = await asyncio.gather(*(_cached_image(data.equip_icon_url(items[n]["icon"]), f"eq_{items[n]['icon']}.png") for n in names))
+            pieces = {n: {"src": src, "attrs": items[n]["attrs"]} for n, src in zip(names, srcs)}
+            html = render.operator_html(op, icon, version, sig, builds, min_sample, pieces)
         image = await html_to_pic(
             html,
             template_path=DATA_DIR.as_uri(),

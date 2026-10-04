@@ -16,7 +16,8 @@ import time
 from collections import Counter
 
 SERVICE = "nonebot.service"
-STARTED = re.compile(r"Event will be handled by (\w*Matcher\(.*?\))\s*$")
+# Alconna commands (all of nonebot-plugin-skland) are announced as "AlconnaMatcherMeta(...)" but finish as "AlconnaMatcher(...)".
+STARTED = re.compile(r"Event will be handled by (\w*Matcher)(?:Meta)?(\(.*?\))\s*$")
 FINISHED = re.compile(r"(?:Running )?(\w*Matcher\(.*?\)) (?:running complete|failed\.?)\s*$")
 
 
@@ -35,7 +36,7 @@ def busy(lines: list[str]) -> list[str]:
     collecting = False
     for line in lines:
         if match := STARTED.search(line):
-            running[match.group(1)] += 1
+            running[match.group(1) + match.group(2)] += 1
         elif match := FINISHED.search(line):
             if running[match.group(1)] > 0:
                 running[match.group(1)] -= 1

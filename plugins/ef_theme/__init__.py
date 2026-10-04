@@ -75,8 +75,11 @@ body.ef { font-family: var(--ef-cjk); color: var(--ef-ink); background-color: va
 """
 
 
-def shrink(data: bytes, scale: float, quality: int = 72) -> bytes:
-    """Downscale + re-encode a rendered JPEG: QQ uploads from this host run at ~20 KB/s."""
+def shrink(data: bytes, scale: float, quality: int = 72, subsampling: int = 2) -> bytes:
+    """Downscale + re-encode a rendered image as JPEG; upload time to QQ grows with the size.
+
+    subsampling 2 = 4:2:0 (smallest); 0 = 4:4:4, which keeps small coloured text sharp for ~15% more bytes.
+    """
     from io import BytesIO
 
     from PIL import Image
@@ -86,7 +89,7 @@ def shrink(data: bytes, scale: float, quality: int = 72) -> bytes:
         if scale != 1:
             image = image.resize((round(image.width * scale), round(image.height * scale)), Image.LANCZOS)
         out = BytesIO()
-        image.save(out, "JPEG", quality=quality, optimize=True, progressive=True)
+        image.save(out, "JPEG", quality=quality, optimize=True, progressive=True, subsampling=subsampling)
     return out.getvalue() if out.tell() < len(data) else data
 
 

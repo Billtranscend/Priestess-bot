@@ -34,6 +34,8 @@ TABLES = (
     "WeaponBasicTable",
     "WeaponUpgradeTemplateTable",
     "ItemTable",
+    "EquipTable",
+    "EquipSuitTable",
     "DungeonTable",
     "DungeonSeriesTable",
     "SeasonTowerTable",
@@ -54,7 +56,7 @@ TABLES = (
     "ActivityWeeklyTaskTable",
     "ActivityWeeklyTaskMileStoneTable",
 )
-INDEX_SCHEMA = 9  # bump to force a rebuild when the index layout changes
+INDEX_SCHEMA = 11  # bump to force a rebuild when the index layout changes
 # Enemy resistance attribute ids (AttributeShowConfigTable), in the in-game display order.
 ENEMY_RESISTANCES = ((94, "物理"), (98, "灼热"), (97, "电磁"), (96, "寒冷"), (95, "自然"), (99, "超域"))
 TOWER_DIFFICULTIES = {"1": "普通", "2": "困难", "3": "残酷"}
@@ -62,6 +64,8 @@ SKILL_TYPES = {0: "普通攻击", 1: "战技", 3: "连携技", 2: "终结技"}
 SKILL_ORDER = (0, 1, 3, 2)
 BASE_ATTRS = (("1", "生命值"), ("2", "攻击力"))  # base DEF is always 0 in Endfield; defense comes from gear
 STAT_LEVEL = 90  # current player level cap; tables extend further
+EQUIP_PARTS = {0: "护甲", 1: "护手", 2: "配件"}
+EQUIP_FLAT_ATTRS = {1, 2, 3, 39, 40, 41, 42, 87}  # HP, ATK, DEF, the four abilities, 源石技艺强度: plain numbers, the rest are ratios
 
 
 def http_client() -> httpx.AsyncClient:
@@ -335,6 +339,8 @@ def build_index(table_dir: Path, version: dict, out_file: Path) -> dict[str, int
 
     index = {
         "schema": INDEX_SCHEMA,
+        "equip_sets": build_equip_sets(load, text, maps),
+        "equip_items": build_equip_items(load, text, maps),
         "endgame": build_endgame(load, text),
         "calendar": build_calendar(load, text),
         "version": version.get("id", ""),
@@ -578,6 +584,96 @@ def build_gacha_gifts(load, text) -> dict:
             if any(entries):
                 result[pool_id] = sorted((e for e in entries if e), key=lambda e: e["at"])
     return result
+
+
+def _equip_value(value: float, modifier: int, flat: bool) -> str:
+    """Modifier types (maps.MODIFIER_TYPE_MAP): 5 / 7 add, 6 multiplies the base, 8 scales damage taken (0.96 = 4% less)."""
+    if modifier == 8:
+        return f"{(1 - value) * 100:.1f}%"
+    if modifier == 6 or not flat:
+        return f"{value * 100:.1f}%"
+    return f"{value:.1f}".removesuffix(".0")
+
+
+def _equip_attrs(equip: dict, maps: dict) -> list[dict]:
+    """The three refinable attributes of a piece, in the game's order (attrIndex 1..3)."""
+    attrs = []
+    for mod in equip.get("displayAttrModifiers") or []:
+        composite = mod.get("compositeAttr") or ""
+        flat = mod.get("attrType") in EQUIP_FLAT_ATTRS or composite in ("Main", "Sub")
+        enhanced = mod.get("enhancedAttrValues") or []
+        attrs.append(
+            {
+                "name": maps["COMPOSITE_NAME_MAP"].get(composite) or maps["ATTR_MAP"].get(str(mod.get("attrType")), ""),
+                "base": _equip_value(mod.get("attrValue", 0.0), mod.get("modifierType"), flat),
+                "max": _equip_value(enhanced[-1], mod.get("modifierType"), flat) if enhanced else "",
+            }
+        )
+    return attrs
+
+
+def build_equip_items(load, text, maps) -> dict:
+    """Every piece of equipment by name (set pieces and loose ones): icon and attribute names, for the build statistics."""
+    equips, items = load("EquipTable"), load("ItemTable")
+    result: dict[str, dict] = {}
+    for equip_id, equip in equips.items():
+        item = items.get(equip_id, {})
+        name = text(item.get("name"))
+        if name:
+            result.setdefault(name, {"icon": item.get("iconId") or equip_id, "attrs": [a["name"] for a in _equip_attrs(equip, maps)]})
+    return result
+
+
+def build_equip_sets(load, text, maps) -> dict:
+    """Equipment sets: the 3-piece effect and every piece with its attributes before and after full enhancement."""
+    equips, items, skills = load("EquipTable"), load("ItemTable"), load("SkillPatchTable")
+    sets: dict[str, dict] = {}
+    for set_id, row in load("EquipSuitTable").items():
+        rule = (row.get("list") or [{}])[0]
+        name = text(rule.get("suitName"))
+        bundle = skills.get(rule.get("skillID", ""), {}).get("SkillPatchDataBundle", [])
+        if not name or not bundle:
+            continue
+        rank = bundle[min(max(rule.get("skillLv", 1), 1), len(bundle)) - 1]
+        values = {e["key"].lower(): e["value"] for e in rank.get("blackboard", [])}
+        pieces = []
+        for equip_id in row.get("equipList") or []:
+            equip, item = equips.get(equip_id), items.get(equip_id, {})
+            piece_name = text(item.get("name"))
+            if not equip or not piece_name:
+                continue
+            pieces.append(
+                {
+                    "id": equip_id,
+                    "name": piece_name,
+                    "part": EQUIP_PARTS.get(equip.get("partType"), ""),
+                    "rarity": item.get("rarity", 0),
+                    "level": equip.get("minWearLv", 0),
+                    "icon": item.get("iconId") or equip_id,
+                    "defense": round((equip.get("displayBaseAttrModifier") or {}).get("attrValue", 0)),
+                    "domain": maps["DOMAIN_MAP"].get(equip.get("domainId", ""), ""),
+                    "attrs": _equip_attrs(equip, maps),
+                }
+            )
+        if not pieces:
+            continue
+        order = list(EQUIP_PARTS.values())
+        pieces.sort(key=lambda p: (-p["rarity"], order.index(p["part"]) if p["part"] in order else 9, p["id"]))
+        sets[set_id] = {
+            "id": set_id,
+            "name": name,
+            "count": rule.get("equipCnt", 3),
+            "effect": rich_to_html(fill_placeholders(text(rank.get("description")), values)),
+            "rarity": pieces[0]["rarity"],
+            "level": max(p["level"] for p in pieces),
+            "domain": pieces[0]["domain"],
+            "pieces": pieces,
+        }
+    return sets
+
+
+def equip_icon_url(icon_id: str) -> str:
+    return f"{IMAGE_BASE}/itemicon/{icon_id}.png"
 
 
 def char_icon_url(char_id: str) -> str:

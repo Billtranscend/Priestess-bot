@@ -13,6 +13,8 @@ Group=bot
 WorkingDirectory=/opt/priestess-bot
 Environment=PYTHONUNBUFFERED=1
 Environment=ENVIRONMENT=prod
+# nonebot-plugin-skland formats dates with the process-local time and assumes Beijing time
+Environment=TZ=Asia/Shanghai
 ExecStart=/opt/priestess-bot/.venv/bin/python /opt/priestess-bot/bot.py
 Restart=on-failure
 RestartSec=5

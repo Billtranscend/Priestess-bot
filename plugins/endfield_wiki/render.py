@@ -1,4 +1,4 @@
-"""HTML cards for Endfield operators and weapons (rendered by htmlrender), in the shared ef_theme look."""
+"""HTML cards for Endfield operators, weapons and equipment sets (rendered by htmlrender), in the shared ef_theme look."""
 
 from __future__ import annotations
 
@@ -56,6 +56,40 @@ th.pt span { display: inline-block; min-width: 22px; margin-left: 4px; text-alig
   background: var(--ef-ink); color: var(--ef-yellow); }
 td b { color: var(--ef-ink); }
 table.lvs tr:last-child th, table.lvs tr:last-child td { background: var(--ef-panel-2); }
+
+/* equipment sets and build statistics */
+.use { padding: 8px 16px 4px; }
+.use .row { display: flex; align-items: center; gap: 10px; padding: 4px 0; font-size: 16px; }
+.use .row b { flex: none; width: 116px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.use .bar { flex: 1; height: 16px; background: var(--ef-panel-2); border: 1px solid var(--ef-line); }
+.use .bar u { display: block; height: 100%%; background: var(--ef-yellow); border-right: 1px solid var(--ef-ink); }
+.use .row span { flex: none; width: 92px; text-align: right; font-family: var(--ef-num); font-weight: 700; font-size: 17px; }
+.use .row span i { font-style: normal; font-family: var(--ef-cjk); font-weight: 400; font-size: 13px; color: var(--ef-sub); margin-left: 3px; }
+.typ { margin: 4px 16px 0; padding: 10px 0 2px; border-top: 1px solid var(--ef-line-2); font-size: 15px; }
+.typ .tt { font-size: 14px; color: var(--ef-sub); margin-bottom: 2px; }
+.typ .tt b { color: var(--ef-ink); font-size: 16px; }
+.typ .pc { display: flex; gap: 10px; align-items: flex-start; padding: 7px 0; border-top: 1px dashed var(--ef-line-2); }
+.typ .pc:first-of-type { border-top: 0; }
+.typ .pc img, .typ .pc .ph { flex: none; width: 56px; height: 56px; object-fit: contain; background: var(--ef-panel-2); border: 1px solid var(--ef-line); border-bottom: 3px solid var(--ef-yellow); }
+.typ .pc > div { flex: 1; min-width: 0; }
+.typ .pc b { font-size: 17px; }
+.typ .pc small { margin-left: 8px; font-size: 13px; color: var(--ef-sub); }
+.typ .rf { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 5px; }
+.typ .rf span { font-size: 13px; line-height: 20px; padding: 0 6px; border: 1px solid var(--ef-line); background: var(--ef-panel); white-space: nowrap; }
+.typ .rf span em { font-style: normal; font-family: var(--ef-num); font-weight: 700; font-size: 16px; margin-left: 5px; }
+.typ .rf span.hot { background: var(--ef-yellow); border-color: var(--ef-ink); font-weight: 700; }
+.hint { padding: 8px 16px 12px; font-size: 13px; line-height: 1.6; color: var(--ef-sub); }
+table.eq td { padding: 8px 12px; vertical-align: middle; }
+table.eq td.ic { width: 64px; padding-right: 0; }
+table.eq td.ic img { display: block; width: 60px; height: 60px; object-fit: contain; background: var(--ef-panel-2); border: 1px solid var(--ef-line); border-bottom: 3px solid var(--ef-yellow); }
+table.eq td.nm { width: 250px; }
+table.eq td.nm b { display: block; font-size: 18px; }
+table.eq td.nm small { font-size: 13px; color: var(--ef-sub); }
+table.eq tr.hit td { background: rgba(255,225,0,.22); }
+table.eq .at { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 15px; }
+table.eq .at span { white-space: nowrap; }
+table.eq .at em { font-style: normal; font-family: var(--ef-num); font-weight: 700; font-size: 17px; margin-left: 5px; }
+table.eq .at i { font-style: normal; color: var(--ef-faint); margin: 0 3px; }
 """ % WIDTH
 
 
@@ -127,7 +161,111 @@ def weapon_html(weapon: dict, icon_src: str, version: str, note: str = "") -> st
     return _page(head, body, foot)
 
 
-def operator_html(op: dict, icon_src: str, version: str, signature_name: str) -> str:
+def _usage_rows(rows: list[tuple[str, int, int]], unit: str) -> str:
+    """Bars for (label, count, out of)."""
+    return "".join(
+        f'<div class="row"><b>{escape(label)}</b><div class="bar"><u style="width:{round(count / max(total, 1) * 100)}%"></u></div>'
+        f"<span>{round(count / max(total, 1) * 100)}%<i>{count} {unit}</i></span></div>"
+        for label, count, total in rows
+    )
+
+
+REFINE_MARGIN = 0.1  # attributes within this of a piece's most refined one are marked as the ones members go for
+
+
+def _builds_box(builds: dict | None, min_sample: int, pieces: dict[str, dict]) -> str:
+    """What bound members run on this operator; there is no official recommendation in the game data.
+
+    `pieces` maps a piece name to {"src": icon, "attrs": [attribute names]} for the pieces of the typical build.
+    """
+    if not builds or builds["n"] < min_sample:
+        body = f'<div class="hint">已成套的群友不足 {min_sample} 人，暂无统计。</div>'
+        return _sec("群友配装", body)
+    rows = _usage_rows([(name, count, builds["n"]) for name, count in builds["sets"]], "人")
+    typical, refined = "", False
+    for piece in builds["typical"]:
+        info = pieces.get(piece["name"], {})
+        icon = f'<img src="{escape(info["src"])}">' if info.get("src") else '<div class="ph"></div>'
+        chips = ""
+        if piece.get("refine") and info.get("attrs"):  # loose pieces have two attributes, set pieces three
+            refined = True
+            levels = piece["refine"][: len(info["attrs"])]
+            chips = '<div class="rf">' + "".join(
+                f'<span{" class=hot" if level >= 1 and level >= max(levels) - REFINE_MARGIN else ""}>{escape(attr)}<em>{level:.1f}</em></span>'
+                for attr, level in zip(info["attrs"], levels)
+            ) + "</div>"
+        typical += f'<div class="pc">{icon}<div><b>{escape(piece["name"])}</b><small>{escape(piece["slot"])}</small>{chips}</div></div>'
+    refine_hint = "词条后的数字是穿这件装备的群友对该词条的平均精锻次数（满 3 次），黄底是这件装备上群友精锻最多的词条。" if refined else ""
+    body = (
+        f'<div class="use">{rows}</div>'
+        f'<div class="typ"><div class="tt">常见搭配 · <b>{escape(builds["typical_set"])}</b></div>{typical}</div>'
+        f'<div class="hint">{refine_hint}统计自已绑定群友 Lv70 以上、已凑齐 3 件套的该干员，每天更新；不是官方推荐。发送 /套装名 查看套装详情。</div>'
+    )
+    return _sec("群友配装", body, f'{builds["n"]} 人已成套')
+
+
+def equip_set_html(equip_set: dict, icons: dict[str, str], version: str, usage: dict | None, min_sample: int, asked: str = "") -> str:
+    parts: dict[str, list[dict]] = {}
+    for piece in equip_set["pieces"]:
+        parts.setdefault(piece["part"], []).append(piece)
+    tables = ""
+    for part, pieces in parts.items():
+        rows = ""
+        for piece in pieces:
+            attrs = "".join(
+                f'<span>{escape(a["name"])}<em>{a["base"]}</em>' + (f'<i>→</i><em>{a["max"]}</em>' if a["max"] else "") + "</span>"
+                for a in piece["attrs"]
+            )
+            icon = f'<img src="{escape(icons[piece["id"]])}">' if icons.get(piece["id"]) else ""
+            rows += (
+                f'<tr{" class=hit" if piece["name"] == asked else ""}><td class="ic">{icon}</td>'
+                f'<td class="nm"><b>{escape(piece["name"])}</b><small>{"★" * piece["rarity"]} · Lv{piece["level"]} · 防御力 {piece["defense"]}</small></td>'
+                f'<td><div class="at">{attrs}</div></td></tr>'
+            )
+        tables += _sec(escape(part), f'<table class="eq">{rows}</table>', f"{len(pieces)} 件可选")
+    if usage and usage["n"] >= min_sample:
+        use_body = (
+            f'<div class="use">{_usage_rows(usage["operators"], "人")}</div>'
+            '<div class="hint">百分比为该干员已成套的群友中使用本套装的比例；统计自已绑定群友 Lv70 以上的干员，每天更新。</div>'
+        )
+        use_box = _sec("群友给谁穿", use_body, f'{usage["n"]} 套')
+    else:
+        use_box = _sec("群友给谁穿", f'<div class="hint">穿这套的群友不足 {min_sample} 人，暂无统计。</div>')
+    head = ef_theme.head(
+        "Arknights: Endfield · Equipment Set",
+        escape(equip_set["name"]),
+        f'<span class="eng">装备套装 · {escape(equip_set["domain"])}</span>',
+        _stars(equip_set["rarity"]),
+    )
+    body = f"""
+<div class="wrap">
+  <div class="side">
+    <div class="ef-sec">
+      <h3>套装信息</h3>
+      <div class="tiles">
+        <div class="tile"><small>产地</small><b>{escape(equip_set["domain"]) or "—"}</b></div>
+        <div class="tile"><small>穿戴等级</small><b class="n">Lv{equip_set["level"]}</b></div>
+        <div class="tile"><small>生效件数</small><b><span class="ef-num" style="font-weight:700;font-size:28px">{equip_set["count"]}</span> 件</b></div>
+        <div class="tile"><small>可选装备</small><b><span class="ef-num" style="font-weight:700;font-size:28px">{len(equip_set["pieces"])}</span> 件</b></div>
+      </div>
+      {f'<div class="note">查询的装备：{escape(asked)}</div>' if asked else ""}
+    </div>
+    {_sec(f'套装效果<span class="ef-tag y">{equip_set["count"]} 件</span>', f'<div class="body desc">{equip_set["effect"]}</div>')}
+    {use_box}
+  </div>
+  <div class="main">
+    <div class="mh"><b>装备列表</b><span>Equipment</span></div>
+    {tables}
+    <div class="hint" style="padding-left:0">属性为 未精锻 → 精锻满级 的数值；每个干员可穿 1 护甲、1 护手、2 配件，任意 {equip_set["count"]} 件同套装即生效。</div>
+  </div>
+</div>"""
+    foot = ef_theme.foot(f'数据来源 AKEData · 装备套装/{escape(equip_set["name"])}<br>数据版本 {escape(version)}')
+    return _page(head, body, foot)
+
+
+def operator_html(
+    op: dict, icon_src: str, version: str, signature_name: str, builds: dict | None = None, min_sample: int = 3, pieces: dict | None = None
+) -> str:
     stats = "".join(f'<div class="tile"><small>{escape(k)}</small><b class="n">{v}</b></div>' for k, v in op["stats"])
     skills = "".join(
         _sec(f'{escape(s["name"])}<span class="ef-tag d">{escape(s["type"])}</span>', f'<div class="body desc">{s["desc"]}</div>')
@@ -165,6 +303,7 @@ def operator_html(op: dict, icon_src: str, version: str, signature_name: str) ->
       <h3>Lv90 基础属性</h3>
       <div class="tiles">{stats}</div>
     </div>
+    {_builds_box(builds, min_sample, pieces or {})}
   </div>
   <div class="main">
     <div class="mh"><b>干员资料</b><span>Operator Profile</span></div>
