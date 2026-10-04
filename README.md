@@ -32,6 +32,9 @@ A QQ group bot for Arknights: Endfield / Arknights communities, built on NoneBot
 
 ## 功能
 
+- 入群与默认订阅：自动同意入群邀请；进群后可按模板为新群添加 nonebot-bison 的 B 站订阅
+  （明日方舟、明日方舟终末地，规则与多数群一致），由沙箱外的一个小服务写入 Bison 数据库，见「部署」
+- 临时会话或私聊里触发的合并转发回复（例如多页的抽卡记录）只发给本人，不会被发到群里
 - 森空岛账号绑定（扫码或 Token），明日方舟与终末地每日自动签到，签到遇到网络超时自动重试；
   首次绑定成功后立即自动签到一次，避免绑定当天漏签
 - 绑定保护：已绑定且登录有效的成员不再发放二维码；扫码的森空岛账号若已绑定在另一个 QQ 上则拒绝；
@@ -153,6 +156,24 @@ NapCat 以反向 WebSocket 客户端连入。动态推送可另外搭配
 更新代码后建议用 `.venv/bin/python deploy/restart_when_idle.py` 重启：它会等到没有指令正在处理、
 也没有战绩收集在进行时才重启，避免打断群友的操作。该脚本假设服务名为 `nonebot.service` 且当前用户可免密执行 `sudo`。
 
+### 可选：新群自动添加 Bison 订阅
+
+`plugins/group_onboarding` 会自动同意入群邀请，并在机器人进群后把群号写入
+`data/group_onboarding/requests/`（一个以群号命名的空文件）。如果同一台机器上还运行着
+[nonebot-bison](https://github.com/MountainDash/nonebot-bison)，可以让 `deploy/bison_subscribe.py`
+据此为新群添加默认订阅：
+
+- Bison 的管理接口需要超级用户在聊天里临时申请令牌，无法自动调用，所以脚本直接写 Bison 的 SQLite 数据库，
+  写入的行与 Bison 自己添加订阅时相同；每次写入前先备份数据库。
+- 只会订阅 Bison 已经在跟踪的目标（至少有一个群订阅过），只添加该群还没有的订阅，不修改已有订阅；
+  Bison 每次推送时从数据库读取订阅者，无需重启。
+- 订阅模板（平台、目标、分类、标签）写在脚本顶部的常量里，按需修改。
+- 机器人进程通常没有权限写 Bison 的数据库，脚本由 systemd 的 path 单元在机器人沙箱之外触发，
+  示例见 `deploy/bison-subscribe.service.example` 与 `deploy/bison-subscribe.path.example`。
+  请求目录对机器人可写，脚本只使用其中纯数字的文件名，不读取文件内容。
+
+不部署这两个单元时，插件仍会同意邀请，只是不会添加订阅。
+
 ## 配置
 
 `.env` 中的主要配置项：
@@ -271,6 +292,8 @@ deploy/
   render_skl_help.py           生成帮助图
   orm_cli.py                   数据库迁移命令行
   restart_when_idle.py         等待没有指令在处理时再重启服务
+  bison_subscribe.py           为新加入的群添加默认的 nonebot-bison 订阅（可选）
+  bison-subscribe.*.example    触发上述脚本的 systemd 单元示例
 plugins/
   ef_theme/                    共享的终末地风格样式与字体
   endfield_wiki/               终末地资料库（AKEData 同步、检索、资料卡）
@@ -292,6 +315,8 @@ plugins/
   perithacus_guard/            pErithacus 管理指令权限保护
   perithacus_trigger_resilience/  pErithacus 关键词触发的下载超时保护
   command_tolerance/           忽略消息开头的文字版「@机器人」
+  temp_session_forward/        临时会话 / 私聊触发的合并转发只发给本人
+  group_onboarding/            自动同意入群邀请，为新群排队添加默认订阅
   strict_command.py            指令严格匹配规则
 ```
 

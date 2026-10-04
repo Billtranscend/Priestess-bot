@@ -18,6 +18,7 @@ def load_required_plugin(module_name: str) -> None:
 
 
 load_required_plugin("plugins.command_tolerance")
+load_required_plugin("plugins.temp_session_forward")
 load_required_plugin("nonebot_plugin_perithacus")
 load_required_plugin("plugins.perithacus_guard")
 load_required_plugin("plugins.perithacus_trigger_resilience")
@@ -38,6 +39,7 @@ load_required_plugin("plugins.endfield_guide")
 load_required_plugin("plugins.weekly_report")
 load_required_plugin("plugins.skland_health")
 load_required_plugin("plugins.heybox_import")
+load_required_plugin("plugins.group_onboarding")
 nonebot.load_builtin_plugin("echo")
 
 
