@@ -216,7 +216,10 @@ async def drain_queue():
 async def start_auto_gacha():
     global _queue, _stopping
     verify_upstream()
-    if binding.get_characters_and_bind is not _bind_then_enqueue:
+    hook = binding.get_characters_and_bind
+    while hook is not _bind_then_enqueue and getattr(hook, "_bind_sign", False):  # skland_bind_sign wraps this hook
+        hook = hook.__wrapped__
+    if hook is not _bind_then_enqueue:
         raise RuntimeError("Skland auto-gacha binding hook replaced")
     _queue = Queue(STATE)
     _queue.initialize_day(datetime.now(timezone.utc))

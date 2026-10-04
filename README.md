@@ -32,7 +32,8 @@ A QQ group bot for Arknights: Endfield / Arknights communities, built on NoneBot
 
 ## 功能
 
-- 森空岛账号绑定（扫码或 Token），明日方舟与终末地每日自动签到，签到遇到网络超时自动重试
+- 森空岛账号绑定（扫码或 Token），明日方舟与终末地每日自动签到，签到遇到网络超时自动重试；
+  首次绑定成功后立即自动签到一次，避免绑定当天漏签
 - 终末地角色卡（开盒）、全干员练度详情、抽卡记录与每日自动同步、群内欧非榜
 - 终末地资料库：干员与武器资料卡，支持昵称、简称、同音字和模糊匹配；数据来自 AKEData，
   解包数据有新版本时自动重建索引并在群内通知
@@ -261,6 +262,7 @@ plugins/
   skland_ef_theme/             开盒与抽卡记录的终末地风格模板
   skland_compact_images/       开盒与抽卡记录的图片体积控制
   skland_auto_gacha/           抽卡记录每日自动同步
+  skland_bind_sign/            首次绑定后自动签到一次
   skland_shortcuts/            指令别名
   skland_efgacha_compat/       上游武器池数据兼容
   skland_resource_resilience/  上游资源下载的超时与重试
