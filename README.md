@@ -156,6 +156,7 @@ NapCat 以反向 WebSocket 客户端连入。动态推送可另外搭配
 | `COMMAND_START` | `["/"]` | 指令前缀 |
 | `API_TIMEOUT` | `180` | 等待 NapCat 响应的秒数；上传图片较慢时不要调小 |
 | `LOCALSTORE_USE_CWD` | `true` | 插件数据放在工程目录下的 `data/`、`cache/`、`config/` |
+| `SKLAND__EF_GACHA_RENDER_MAX` | `8` | `/zmd抽卡记录` 单张图里每类卡池最多画几个，超过则分页发送；上游默认 5 |
 
 定时任务使用 `nonebot-plugin-apscheduler` 的默认时区 Asia/Shanghai，与服务器系统时区无关。
 
