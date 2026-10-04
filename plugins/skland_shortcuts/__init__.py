@@ -10,6 +10,7 @@ from time import time_ns
 from typing import Any
 
 from nonebot import get_driver, logger, require
+from nonebot.adapters.onebot.v11 import Bot as OneBotV11Bot
 from nonebot.plugin import PluginMetadata
 
 require("nonebot_plugin_skland")
@@ -92,6 +93,30 @@ CONFLICTING_BUILTINS = (
 
 _SHORTCUT_EXTENSION_ID = "builtins.extensions.shortcut:SuperUserShortcutExtension"
 driver = get_driver()
+
+
+# Upstream hints name raw option flags that users of the shortcuts never type; say the shortcut instead.
+HINT_REWRITES = {
+    "请先使用 -u 参数从接口拉取数据": "请先发送 /zmd抽卡记录更新 拉取数据",
+}
+
+
+@OneBotV11Bot.on_calling_api
+async def _rewrite_upstream_hints(bot, api: str, data: dict[str, Any]) -> None:
+    if api not in ("send_msg", "send_group_msg", "send_private_msg"):
+        return
+    message = data.get("message")
+    if isinstance(message, str):
+        for hint, replacement in HINT_REWRITES.items():
+            message = message.replace(hint, replacement)
+        data["message"] = message
+        return
+    for segment in message or ():
+        text = getattr(segment, "data", {}).get("text") if getattr(segment, "type", "") == "text" else None
+        if text:
+            for hint, replacement in HINT_REWRITES.items():
+                text = text.replace(hint, replacement)
+            segment.data["text"] = text
 
 
 def _shortcut_admin_is_protected() -> bool:

@@ -34,7 +34,8 @@ A QQ group bot for Arknights: Endfield / Arknights communities, built on NoneBot
 
 - 森空岛账号绑定（扫码或 Token），明日方舟与终末地每日自动签到，签到遇到网络超时自动重试；
   首次绑定成功后立即自动签到一次，避免绑定当天漏签
-- 终末地角色卡（开盒）、全干员练度详情、抽卡记录与每日自动同步、群内欧非榜
+- 终末地角色卡（开盒）、全干员练度详情、抽卡记录与每日自动同步、群内欧非榜；首次绑定后的第一次抽卡同步完成时会通知本人
+- 从小黑盒「抽卡分析」导入官方接口已无法拉取的早期抽卡记录，导入前校验游戏 UID，官方记录不会被改动，可一键撤销
 - 终末地资料库：干员与武器资料卡，支持昵称、简称、同音字和模糊匹配；数据来自 AKEData，
   解包数据有新版本时自动重建索引并在群内通知
 - 高难关卡（战争回响、影拓丰碑）：关卡攻略卡（机制、敌人数值与抗性、通关阵容、B 站推荐视频）、
@@ -44,7 +45,7 @@ A QQ group bot for Arknights: Endfield / Arknights communities, built on NoneBot
   机器人是管理员的群会附带 @全体成员
 - 森空岛账号体检（每周一 04:00）：自动清理登录失效、或全部角色都无法使用的绑定，删除前自动备份
 - 所有图片统一为终末地风格的版式，并针对 QQ 上传速度做了体积控制
-- 指令严格匹配：指令后必须是空格或结尾，避免聊天内容误触发
+- 指令严格匹配：指令后必须是空格或结尾，避免聊天内容误触发；消息开头手打或复制的文字版「@机器人」会被自动忽略
 
 ## 截图
 
@@ -144,6 +145,9 @@ NapCat 以反向 WebSocket 客户端连入。动态推送可另外搭配
 修改 `plugins/skl_help/help.html` 后，运行 `.venv/bin/python deploy/render_skl_help.py` 重新生成帮助图，
 无需重启。
 
+更新代码后建议用 `.venv/bin/python deploy/restart_when_idle.py` 重启：它会等到没有指令正在处理、
+也没有战绩收集在进行时才重启，避免打断群友的操作。该脚本假设服务名为 `nonebot.service` 且当前用户可免密执行 `sudo`。
+
 ## 配置
 
 `.env` 中的主要配置项：
@@ -181,6 +185,8 @@ NapCat 以反向 WebSocket 客户端连入。动态推送可另外搭配
 | `/zmd账号详情`（别名 `/账号详情`） | 全部干员的练度详情图：武器、技能等级、装备 | 是 |
 | `/zmd签到`、`/zmd签到详情` | 手动签到 / 查看签到状态 | 否 |
 | `/zmd抽卡记录`、`/zmd抽卡记录更新` | 查看 / 立即拉取抽卡记录 | 否 |
+| `/zmd导入小黑盒 小黑盒ID` | 从小黑盒补回更早的抽卡记录；只能导入与自己绑定的终末地 UID 相同的小黑盒账号 | 否 |
+| `/zmd撤销小黑盒导入` | 删除自己从小黑盒导入的全部记录 | 否 |
 | `/zmd欧非榜`（别名 `/欧非榜`） | 本群限定池欧非排行；`/zmd欧非榜 退出` 可不上榜 | 仅群聊 |
 
 ### 终末地资料库
@@ -250,12 +256,14 @@ deploy/
   nonebot.service.example      systemd 单元示例
   render_skl_help.py           生成帮助图
   orm_cli.py                   数据库迁移命令行
+  restart_when_idle.py         等待没有指令在处理时再重启服务
 plugins/
   ef_theme/                    共享的终末地风格样式与字体
   endfield_wiki/               终末地资料库（AKEData 同步、检索、资料卡）
   endfield_guide/              高难关卡攻略、竞速榜、出场率
   endfield_roster/             账号详情
   skland_gacha_rank/           欧非榜
+  heybox_import/               从小黑盒导入早期抽卡记录
   weekly_report/               群周报
   skland_health/               账号体检与签到网络重试
   sanity_reminder/             理智查询与提醒
@@ -263,12 +271,13 @@ plugins/
   skland_ef_theme/             开盒与抽卡记录的终末地风格模板
   skland_compact_images/       开盒与抽卡记录的图片体积控制
   skland_auto_gacha/           抽卡记录每日自动同步
-  skland_bind_sign/            首次绑定后自动签到一次
+  skland_bind_sign/            首次绑定后自动签到一次，并在首次抽卡同步完成后通知
   skland_shortcuts/            指令别名
   skland_efgacha_compat/       上游武器池数据兼容
   skland_resource_resilience/  上游资源下载的超时与重试
   perithacus_guard/            pErithacus 管理指令权限保护
   perithacus_trigger_resilience/  pErithacus 关键词触发的下载超时保护
+  command_tolerance/           忽略消息开头的文字版「@机器人」
   strict_command.py            指令严格匹配规则
 ```
 
@@ -280,6 +289,8 @@ plugins/
 - `data/` 中的数据库保存了用户的森空岛凭证，`.env` 和 `napcat/` 中有访问令牌和 QQ 登录态。
   这些目录已在 `.gitignore` 中排除，请勿提交或公开，并保持目录权限为仅本人可读。
 - 账号体检在删除任何绑定前，会把被删除的数据导出到 `backups/skland-health/`。
+- 小黑盒导入只在用户本人发出指令时读取其小黑盒「抽卡分析」页面的公开数据，并在 `data/heybox_import/` 保留一份原始响应用于追溯；
+  小黑盒只保存汇总数据，导入的记录中六星及其抽数是准确的，四星以占位记录补足数量。
 - 竞速榜和出场率只使用已绑定用户的最佳通关记录；用户可用 `/攻略统计 退出`、`/zmd欧非榜 退出` 退出统计。
 - 机器人日志中会出现 QQ 号和群号，分享日志前请自行脱敏。
 
@@ -323,12 +334,13 @@ plugins/
 | [sqlalchemy/sqlalchemy](https://github.com/sqlalchemy/sqlalchemy) | 数据库访问 | MIT |
 | [jpt/barlow](https://github.com/jpt/barlow) | Barlow Condensed 字体（`plugins/ef_theme/fonts/`） | SIL OFL 1.1 |
 | [AKEData](https://www.akedata.wiki/) | 终末地解包数据：干员、武器、关卡、敌人、活动与卡池时间 | 见站点说明 |
+| [小黑盒](https://www.xiaoheihe.cn/) | 终末地「抽卡分析」：早期抽卡记录的导入来源 | 见站点说明 |
 
 第三方代码与字体的版权声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ## 免责声明
 
-本项目为玩家社区的非官方工具，与鹰角网络（Hypergryph）、GRYPHLINE、森空岛及腾讯 QQ 没有任何关联。
+本项目为玩家社区的非官方工具，与鹰角网络（Hypergryph）、GRYPHLINE、森空岛、小黑盒及腾讯 QQ 没有任何关联。
 《明日方舟》《明日方舟：终末地》的名称、美术素材与游戏数据的著作权归其权利人所有，截图中的游戏素材仅用于
 展示功能。森空岛接口为非公开接口，使用本项目产生的账号风险由使用者自行承担。请勿用于商业用途。
 

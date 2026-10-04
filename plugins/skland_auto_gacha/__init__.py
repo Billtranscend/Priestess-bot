@@ -155,6 +155,19 @@ async def sync_user(uid: int) -> tuple[str, int]:
     return "success", total
 
 
+# Other local plugins may be told when a queued sync ends:
+#   await listener(user_id, status, new_records, final)   (final=False: a retry is scheduled)
+sync_listeners: list = []
+
+
+async def _tell_listeners(uid: int, status: str, records: int, final: bool) -> None:
+    for listener in list(sync_listeners):
+        try:
+            await listener(uid, status, records, final)
+        except Exception as exc:  # a listener must never stall the queue
+            logger.warning("auto-efgacha listener_failed error_type={}", type(exc).__name__)
+
+
 async def queue_daily():
     if _queue is None or _stopping:
         return
@@ -199,10 +212,12 @@ async def drain_queue():
                     _queue.finish(item, "failed", retry=True)
                     logger.warning("auto-efgacha update_failed reason={} attempt={} error_type={}",
                                    item[2], item[3] + 1, type(exc).__name__)
+                    await _tell_listeners(item[0], "failed", 0, item[3] >= 2)
                 else:
                     _queue.finish(item, status, records)
                     logger.info("auto-efgacha update_done reason={} status={} new_records={}",
                                 item[2], status, records)
+                    await _tell_listeners(item[0], status, records, True)
                 await asyncio.sleep(2)
         except asyncio.CancelledError:
             raise
