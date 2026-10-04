@@ -34,7 +34,6 @@ require("plugins.endfield_guide")
 from nonebot import get_bots
 import nonebot_plugin_localstore as store
 from nonebot_plugin_apscheduler import scheduler
-from nonebot_plugin_htmlrender import html_to_pic
 
 from plugins import endfield_guide as guide
 from plugins import ef_theme
@@ -329,8 +328,7 @@ async def build_report(bot: Bot, group_id: int | None, viewer: str | None = None
         + ef_theme.foot(f'关卡、活动与卡池数据来自 AKEData（版本 {escape(index.get("version", ""))}），竞速记录来自森空岛，每天 05:30、17:30 更新<br>每周日 19:00 发送 · 全部指令发 /skl帮助')
         + "</body></html>"
     )
-    image = await html_to_pic(html, template_path=wiki.DATA_DIR.as_uri(), type="jpeg", quality=85, device_scale_factor=1, viewport={"width": WIDTH, "height": 600})
-    return await asyncio.to_thread(ef_theme.shrink, image, 0.9, 75) if len(image) > 450 * 1024 else image
+    return await ef_theme.render_page(html, WIDTH, height=600, template_path=wiki.DATA_DIR.as_uri())
 
 
 def _current_bot() -> Bot | None:

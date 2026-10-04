@@ -6,7 +6,6 @@ owned operator with weapon, skill levels and equipment in one image.
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import time
 from collections import Counter
@@ -28,7 +27,6 @@ require("nonebot_plugin_orm")
 
 import nonebot_plugin_skland
 from nonebot_plugin_alconna import UniMessage, message_reaction
-from nonebot_plugin_htmlrender import html_to_pic
 from nonebot_plugin_orm import async_scoped_session
 from nonebot_plugin_skland.api import SklandAPI
 from nonebot_plugin_skland.commands.endfield.utils import check_user_character
@@ -323,8 +321,7 @@ async def _(event: MessageEvent, user_session: UserSession, session: async_scope
             return
         html, matched, total_skills = _render(card)
         logger.info(f"Endfield roster: {len(card.chars)} operators, skill levels matched {matched}/{total_skills}")
-        image = await html_to_pic(html, type="png", device_scale_factor=SCALE, viewport={"width": WIDTH, "height": 800})
-        image = await asyncio.to_thread(ef_theme.to_webp, image, QUALITY)
+        image = await ef_theme.render_page(html, WIDTH, scale=SCALE, quality=QUALITY)
         await UniMessage.image(raw=image).send()
         await session.commit()
     except MatcherException:

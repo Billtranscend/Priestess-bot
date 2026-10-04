@@ -39,7 +39,6 @@ require("plugins.endfield_wiki")
 import nonebot_plugin_localstore as store
 from nonebot_plugin_alconna import UniMessage, message_reaction
 from nonebot_plugin_apscheduler import scheduler
-from nonebot_plugin_htmlrender import html_to_pic
 
 from plugins import ef_theme
 from plugins import endfield_wiki as wiki
@@ -246,7 +245,7 @@ async def _(bot: Bot, event: MessageEvent, arg: Message = CommandArg()) -> None:
         clears = team_stats(data, pool, f"{group['name']}|{difficulty}")
         target_text = data.get("targets", {}).get(f"{group['name']}|{difficulty}", "")
         html = await _render(endgame, group, stage, difficulty, clears, target_text, videos, stale, isinstance(event, GroupMessageEvent))
-        image = await html_to_pic(html, template_path=wiki.DATA_DIR.as_uri(), type="jpeg", quality=85, device_scale_factor=1, viewport={"width": WIDTH, "height": 800})
+        image = await ef_theme.render_page(html, WIDTH, template_path=wiki.DATA_DIR.as_uri())
         await UniMessage.image(raw=image).send()
         if videos:
             await guide.send("推荐视频（点击链接观看）\n" + _video_text(videos))
@@ -493,7 +492,7 @@ async def _board_page(title: str, subtitle: str, body: str, foot: str = BOARD_FO
         + ef_theme.foot(foot)
         + "</body></html>"
     )
-    return await html_to_pic(html, template_path=wiki.DATA_DIR.as_uri(), type="jpeg", quality=85, device_scale_factor=1, viewport={"width": BOARD_WIDTH, "height": 600})
+    return await ef_theme.render_page(html, BOARD_WIDTH, height=600, template_path=wiki.DATA_DIR.as_uri())
 
 
 async def _speed_card(data, pool, names, group, difficulty, requester, limit) -> str:

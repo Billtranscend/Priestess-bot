@@ -194,9 +194,14 @@ NapCat 以反向 WebSocket 客户端连入。动态推送可另外搭配
 服务器不在东八区时，请给机器人进程设置 `TZ=Asia/Shanghai`（示例 systemd 单元已包含），否则北京时间
 0 点到 8 点之间的日期会早一天。
 
-`/zmd账号详情` 的清晰度由 `plugins/endfield_roster/__init__.py` 顶部的 `SCALE` 与 `QUALITY` 控制，
-图片以 WebP 发送（同等清晰度下约为 JPEG 的四成大小）。上传到 QQ 的速度随时段变化很大，
-图片越大等待越久，文件内注释给出了各档的实测大小。
+所有图片都以 WebP 发送：同等清晰度下约为 JPEG 的四成大小。上传到 QQ 的速度随时段变化很大
+（实测白天与晚高峰相差约十倍），图片越大等待越久。清晰度与体积在三处调整：
+
+- 本仓库自己的页面（资料卡、攻略、榜单、周报、欧非榜、帮助图）：`plugins/ef_theme/__init__.py` 的
+  `PAGE_SCALE` 与 `PAGE_QUALITY`；
+- `/zmd账号详情`：`plugins/endfield_roster/__init__.py` 顶部的 `SCALE` 与 `QUALITY`，文件内注释给出了各档的实测大小；
+- 上游 nonebot-plugin-skland 渲染的全部图片（开盒、抽卡记录、明日方舟卡片等）：
+  `plugins/skland_compact_images/__init__.py` 的 `QUALITY`，以及超长页面的缩放阈值。
 
 ## 指令
 
@@ -307,7 +312,7 @@ plugins/
   sanity_reminder/             理智查询与提醒
   skl_help/                    帮助图
   skland_ef_theme/             开盒与抽卡记录的终末地风格模板
-  skland_compact_images/       开盒与抽卡记录的图片体积控制
+  skland_compact_images/       上游插件渲染的图片统一转为 WebP，超长页面适当缩小
   skland_auto_gacha/           抽卡记录每日自动同步
   skland_bind_sign/            首次绑定后自动签到一次，并在首次抽卡同步完成后通知
   skland_shortcuts/            指令别名

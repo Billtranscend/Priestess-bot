@@ -21,7 +21,7 @@ __plugin_meta__ = PluginMetadata(
     type="application",
 )
 
-HELP_IMAGE = Path(__file__).with_name("help.jpg")
+HELP_IMAGE = Path(__file__).with_name("help.webp")
 
 if not HELP_IMAGE.is_file():
     logger.warning(f"Skland help image is missing: {HELP_IMAGE}")

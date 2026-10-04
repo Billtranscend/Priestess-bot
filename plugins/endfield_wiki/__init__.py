@@ -35,7 +35,8 @@ require("nonebot_plugin_localstore")
 import nonebot_plugin_localstore as store
 from nonebot_plugin_alconna import UniMessage, message_reaction
 from nonebot_plugin_apscheduler import scheduler
-from nonebot_plugin_htmlrender import html_to_pic
+
+from plugins import ef_theme
 
 from . import data, render
 from .lookup import Resolver
@@ -186,14 +187,7 @@ async def _(state: T_State) -> None:
             srcs = await asyncio.gather(*(_cached_image(data.equip_icon_url(items[n]["icon"]), f"eq_{items[n]['icon']}.png") for n in names))
             pieces = {n: {"src": src, "attrs": items[n]["attrs"]} for n, src in zip(names, srcs)}
             html = render.operator_html(op, icon, version, sig, builds, min_sample, pieces)
-        image = await html_to_pic(
-            html,
-            template_path=DATA_DIR.as_uri(),
-            type="jpeg",
-            quality=85,
-            device_scale_factor=1,
-            viewport={"width": render.WIDTH, "height": 800},
-        )
+        image = await ef_theme.render_page(html, render.WIDTH, template_path=DATA_DIR.as_uri())
         await UniMessage.image(raw=image).send()
     except MatcherException:
         raise

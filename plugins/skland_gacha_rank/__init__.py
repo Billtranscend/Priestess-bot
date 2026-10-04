@@ -31,7 +31,6 @@ require("nonebot_plugin_orm")
 
 import nonebot_plugin_localstore as store
 from nonebot_plugin_alconna import UniMessage, message_reaction
-from nonebot_plugin_htmlrender import html_to_pic
 from nonebot_plugin_orm import get_session
 from nonebot_plugin_skland.data_source import ef_gacha_pool_data
 from nonebot_plugin_skland.model import GachaRecord
@@ -275,9 +274,7 @@ async def _(bot: Bot, event: MessageEvent, arg: Message = CommandArg()) -> None:
             await _react(REACTION_DONE)
             await gacha_rank.finish("本群还没有可统计的终末地限定池抽卡记录")
         html = _render_html(entries, len(entries), qq)
-        image = await html_to_pic(
-            html, type="jpeg", quality=85, device_scale_factor=1, viewport={"width": WIDTH, "height": 600}
-        )
+        image = await ef_theme.render_page(html, WIDTH, height=600)
         await UniMessage.image(raw=image).send()
     except MatcherException:
         raise

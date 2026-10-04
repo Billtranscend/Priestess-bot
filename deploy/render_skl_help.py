@@ -25,8 +25,7 @@ from plugins import ef_theme  # noqa: E402
 
 PLUGIN_DIR = ROOT / "plugins" / "skl_help"
 SOURCE = PLUGIN_DIR / "help.html"
-OUTPUT = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else PLUGIN_DIR / "help.jpg"
-QUALITY = 85
+OUTPUT = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else PLUGIN_DIR / "help.webp"
 
 # help.html keeps a placeholder for the theme fonts: their file:// URLs depend on the checkout path.
 html = SOURCE.read_text("utf-8").replace("/*EF_FONTS*/", ef_theme.fonts_css())
@@ -35,12 +34,14 @@ rendered.write_text(html, "utf-8")
 try:
     with sync_playwright() as p:
         browser = p.chromium.launch()
-        page = browser.new_page(viewport={"width": 1080, "height": 800}, device_scale_factor=1)
+        page = browser.new_page(viewport={"width": 1080, "height": 800}, device_scale_factor=ef_theme.PAGE_SCALE)
         page.goto(rendered.as_uri(), wait_until="load")
-        page.screenshot(path=str(OUTPUT), type="jpeg", quality=QUALITY, full_page=True)
+        screenshot = page.screenshot(type="png", full_page=True)
         browser.close()
 finally:
     rendered.unlink(missing_ok=True)
+
+OUTPUT.write_bytes(ef_theme.to_webp(screenshot, ef_theme.PAGE_QUALITY))
 
 os.chmod(OUTPUT, 0o600)
 print(f"{OUTPUT} {OUTPUT.stat().st_size // 1024} KB")
