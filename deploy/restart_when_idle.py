@@ -18,7 +18,8 @@ from collections import Counter
 SERVICE = "nonebot.service"
 # Alconna commands (all of nonebot-plugin-skland) are announced as "AlconnaMatcherMeta(...)" but finish as "AlconnaMatcher(...)".
 STARTED = re.compile(r"Event will be handled by (\w*Matcher)(?:Meta)?(\(.*?\))\s*$")
-FINISHED = re.compile(r"(?:Running )?(\w*Matcher\(.*?\)) (?:running complete|failed\.?)\s*$")
+# "running is cancelled": a run preprocessor refused the command (e.g. the binding guard).
+FINISHED = re.compile(r"(?:Running )?(\w*Matcher\(.*?\)) (?:running complete|running is cancelled|failed\.?)\s*$")
 
 
 def journal() -> list[str]:

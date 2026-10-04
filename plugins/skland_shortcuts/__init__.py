@@ -111,7 +111,8 @@ async def _rewrite_upstream_hints(bot, api: str, data: dict[str, Any]) -> None:
             message = message.replace(hint, replacement)
         data["message"] = message
         return
-    for segment in message or ():
+    segments = [message] if hasattr(message, "type") and hasattr(message, "data") else message or ()  # a lone MessageSegment is not iterable
+    for segment in segments:
         text = getattr(segment, "data", {}).get("text") if getattr(segment, "type", "") == "text" else None
         if text:
             for hint, replacement in HINT_REWRITES.items():

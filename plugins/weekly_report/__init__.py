@@ -1,8 +1,7 @@
 """Weekly group report, posted to every group on Sunday 19:00 (Asia/Shanghai).
 
 Sections: weekly task reminders, this group's War Echoes speed top 3, rotation countdown and the
-next rotation, this week's group essence messages (the bot's own messages are skipped), activities
-opening / ending within a week, and gacha pools with time left.
+next rotation, activities opening / ending within a week, and gacha pools with time left.
 
 Groups where the bot is admin / owner get @全体成员 with the scheduled report: the list is
 refreshed daily at 06:00 and re-checked (role + today's @全体 quota) right before sending.
@@ -13,16 +12,12 @@ refreshed daily at 06:00 and re-checked (role + today's @全体 quota) right bef
 from __future__ import annotations
 
 import asyncio
-import base64
 import contextlib
-import io
 import json
 import time
 from datetime import datetime, timedelta
 from html import escape
 
-import httpx
-from PIL import Image
 from nonebot import logger, on_command, require
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent, MessageSegment
 from nonebot.permission import SUPERUSER
@@ -58,8 +53,6 @@ SEND_GAP = 6.0
 DATA_DIR = store.get_plugin_data_dir()
 DATA_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
 ADMIN_FILE = DATA_DIR / "admin_groups.json"  # refreshed daily at 06:00
-ESSENCE_LIMIT = 8
-IMAGE_LIMIT = 10 * 1024 * 1024
 
 preview = on_command("周报预览", rule=strict, permission=SUPERUSER, priority=5, block=True)
 
@@ -227,110 +220,6 @@ def _rotation_section(index: dict, now: datetime) -> str:
     return _card("战争回响轮换", "".join(rows), "关卡攻略发 /攻略 关卡名")
 
 
-def _shrink(content: bytes) -> tuple[str, float] | None:
-    """JPEG data URI no larger than 900px on the long side, plus the width/height ratio."""
-    with Image.open(io.BytesIO(content)) as image:
-        image = image.convert("RGB")
-        image.thumbnail((900, 900))
-        out = io.BytesIO()
-        image.save(out, "JPEG", quality=85)
-        return f"data:image/jpeg;base64,{base64.b64encode(out.getvalue()).decode()}", image.width / image.height
-
-
-async def _fetch_image(url: str) -> tuple[str, float] | None:
-    try:
-        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-        if len(response.content) > IMAGE_LIMIT:
-            return None
-        return await asyncio.to_thread(_shrink, response.content)
-    except Exception:
-        return None
-
-
-ROW_WIDTH = WIDTH - 52 - 2 - 28  # essence area inside the card
-TILE_EXTRA = 26  # tile padding + side borders
-TILE_GAP, IMAGE_GAP = 12, 6
-
-
-def _tile_width(tile: dict, height: float) -> float:
-    ratios = sum(r for _, r in tile["images"])
-    return ratios * height + IMAGE_GAP * (len(tile["images"]) - 1) + TILE_EXTRA
-
-
-def _layout(tiles: list[dict]) -> str:
-    """Text-only tiles in a two-column grid, then justified rows of image tiles that share one height."""
-    texts = [t for t in tiles if not t["images"]]
-    grid = "".join(f'<div class="ess">{t["head"]}<div class="ec">{t["text"]}</div></div>' for t in texts)
-    html = [f'<div class="essgrid{" one" if len(texts) == 1 else ""}">{grid}</div>'] if texts else []
-    rows, row = [], []
-    for tile in (t for t in tiles if t["images"]):
-        if row and sum(_tile_width(t, 420) for t in row + [tile]) + TILE_GAP * len(row) > ROW_WIDTH:
-            rows.append(row)
-            row = []
-        row.append(tile)
-    if row:
-        rows.append(row)
-    for row in rows:
-        ratios = sum(r for t in row for _, r in t["images"])
-        fixed = sum(_tile_width(t, 0) for t in row) + TILE_GAP * (len(row) - 1)
-        height = max(160, min(680, (ROW_WIDTH - fixed) / ratios))
-        cells = []
-        for tile in row:
-            imgs = "".join(f'<img src="{src}" style="width:{r * height:.0f}px;height:{height:.0f}px">' for src, r in tile["images"])
-            style, gallery = f"width:{_tile_width(tile, height):.0f}px", f'<div class="gal">{imgs}</div>'
-            text = f'<div class="ec">{tile["text"]}</div>' if tile["text"] else ""
-            cells.append(f'<div class="ess" style="{style}">{tile["head"]}{text}{gallery}</div>')
-        html.append(f'<div class="essrow">{"".join(cells)}</div>')
-    return "".join(html)
-
-
-async def _essence_section(bot: Bot, group_id: int | None, since: datetime, names: dict[str, str]) -> str:
-    if group_id is None:
-        return ""
-    for attempt in range(3):  # large essence lists take NapCat ~10 s and occasionally fail once
-        try:
-            items = (await bot.call_api("get_essence_msg_list", group_id=group_id)) or []
-            break
-        except Exception as e:
-            if attempt == 2:
-                logger.warning(f"Weekly report essence unavailable: {type(e).__name__}")
-                return _card("本周群精华", '<div class="ef-empty">精华消息暂时获取失败</div>')
-            await asyncio.sleep(5)
-    fresh = [
-        item for item in items
-        if int(item.get("operator_time") or 0) >= since.timestamp() and str(item.get("sender_id")) != str(bot.self_id)
-    ]
-    fresh.sort(key=lambda item: int(item.get("operator_time") or 0), reverse=True)
-    if not fresh:
-        return _card("本周群精华", '<div class="ef-empty">本周没有新的精华消息</div>')
-    tiles = []
-    for item in fresh[:ESSENCE_LIMIT]:
-        parts, images = [], []
-        for segment in item.get("content") or []:
-            kind, data = segment.get("type"), segment.get("data") or {}
-            if kind == "text":
-                parts.append(escape(data.get("text", "")).replace("\n", "<br>"))
-            elif kind == "at":
-                parts.append(f'<span class="at">@{escape(names.get(str(data.get("qq")), data.get("name") or "群友"))}</span>')
-            elif kind == "image":
-                url = data.get("url") or (data.get("file") if str(data.get("file", "")).startswith("http") else "")
-                image = await _fetch_image(url) if url else None
-                images.append(image) if image else parts.append('<span class="dim">[图片]</span>')
-            elif kind == "face":
-                parts.append('<span class="dim">[表情]</span>')
-            elif kind in ("video", "record", "file", "forward", "json"):
-                parts.append(f'<span class="dim">[{ {"video": "视频", "record": "语音", "file": "文件", "forward": "聊天记录", "json": "卡片"}[kind] }]</span>')
-        sender = names.get(str(item.get("sender_id")), item.get("sender_nick") or "群友")
-        when = datetime.fromtimestamp(int(item.get("operator_time") or 0), CN)
-        head = f'<div class="eh"><b>{escape(sender)}</b><span>{when:%m/%d} · {escape(item.get("operator_nick") or "管理员")} 设精</span></div>'
-        text = "".join(parts) or ("" if images else '<span class="dim">[无法显示的消息]</span>')
-        tiles.append({"head": head, "text": text, "images": images})
-    more = f"共 {len(fresh)} 条，显示最近 {ESSENCE_LIMIT} 条" if len(fresh) > ESSENCE_LIMIT else f"共 {len(fresh)} 条"
-    return _card("本周群精华", f'<div class="esslist">{_layout(tiles)}</div>', more)
-
-
 def _events_section(index: dict, now: datetime) -> str:
     horizon = now + timedelta(days=7)
     opening, closing, seen = [], [], set()
@@ -403,14 +292,6 @@ td.pl span { font-weight: 700; } td.pl small { display: block; font-size: 13px; 
 .rl.next { background: var(--ef-panel-2); border-color: var(--ef-line); color: var(--ef-sub); }
 .chips { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; }
 .chips span { font-size: 15px; padding: 3px 12px; border: 1px solid var(--ef-ink); background: #fff; }
-.esslist { padding: 14px 14px 2px; }
-.essgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; } .essgrid.one { grid-template-columns: 1fr; }
-.essrow { display: flex; gap: 12px; margin-bottom: 12px; justify-content: center; align-items: flex-start; }
-.ess { padding: 10px 12px; background: #fff; border: 1px solid var(--ef-line); border-top: 3px solid var(--ef-ink); min-width: 0; }
-.gal { display: flex; gap: 6px; margin-top: 8px; } .gal img { display: block; object-fit: cover; flex: none; border: 1px solid var(--ef-line-2); }
-.eh { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; } .eh b { font-size: 17px; } .eh span { font-size: 13px; color: var(--ef-sub); white-space: nowrap; }
-.ec { margin-top: 6px; font-size: 17px; line-height: 1.6; word-break: break-all; }
-.at { color: var(--ef-blue); } .dim { color: var(--ef-faint); }
 .ev { padding: 10px 16px; border-top: 1px solid var(--ef-line-2); } .ev:first-of-type { border-top: 0; }
 .evh { display: inline-block; font-size: 13px; padding: 0 8px; margin-bottom: 6px; background: var(--ef-ink); color: #f4f4f0; }
 .evr { display: flex; justify-content: space-between; padding: 4px 0; font-size: 18px; } .evr span { color: var(--ef-sub); font-size: 16px; }
@@ -432,7 +313,6 @@ async def build_report(bot: Bot, group_id: int | None, viewer: str | None = None
         _tasks_section(index, now),
         await _speed_section(index, now, pool, names),
         _rotation_section(index, now),
-        await _essence_section(bot, group_id, week_start, names),
         _events_section(index, now),
         _pools_section(index, now),
     ]
@@ -519,8 +399,8 @@ async def _send_report(bot: Bot, group_id: int, image: bytes, at_all: bool) -> b
 async def send_all(bot: Bot, at_all: bool = True) -> dict[str, int]:
     """One report per group, with @全体成员 where the bot is admin (only on the scheduled run).
 
-    Large groups take ~1 min (essence + images), so the OneBot connection may have been
-    re-established in between: fetch the live bot for every group and retry once."""
+    The run takes a while, so the OneBot connection may have been re-established in between:
+    fetch the live bot for every group and retry once."""
     stats = {"ok": 0, "fail": 0, "at_all": 0}
     for group in await bot.get_group_list():
         group_id = group["group_id"]
