@@ -51,7 +51,9 @@ A QQ group bot for Arknights: Endfield / Arknights communities, built on NoneBot
 - 理智查询，理智回满时在群内提醒
 - 活动日历与活动开启通知（终末地、明日方舟）：`/zmd活动`、`/mrfz活动` 列出正在开放和即将开启的活动、
   卡池及截止时间；有活动开启时在各群自动发送一张通知图（不 @全体，夜间开启的活动在早上统一通知）。
-  明日方舟的数据合并自游戏数据表与 PRTS Wiki 的公开接口，停机维护日以公告的开启时间为准
+  明日方舟的数据合并自游戏数据表与 PRTS Wiki 的公开接口，停机维护日以公告的开启时间为准。
+  两款游戏各用自己的界面风格（终末地为浅色黑黄，明日方舟为深色蓝白），每个活动和卡池都配有
+  它自己的横幅图，一眼能看出是什么活动
 - 群周报（每周日 19:00）：每周任务、本群竞速前三、关卡轮换、活动与卡池倒计时；
   机器人是管理员的群会附带 @全体成员
 - 森空岛账号体检（每周一 04:00）：自动清理登录失效、或全部角色都无法使用的绑定，删除前自动备份
@@ -397,7 +399,7 @@ plugins/
 | [AKEData](https://www.akedata.wiki/) | 终末地解包数据：干员、武器、关卡、敌人、活动与卡池时间 | 见站点说明 |
 | [小黑盒](https://www.xiaoheihe.cn/) | 终末地「抽卡分析」：早期抽卡记录的导入来源 | 见站点说明 |
 | [yuanyan3060/ArknightsGameResource](https://github.com/yuanyan3060/ArknightsGameResource) | 明日方舟游戏数据表：活动与卡池时间 | 见仓库说明 |
-| [PRTS Wiki](https://prts.wiki/) | 明日方舟已公布活动的时间（仅使用其公开 API）、卡池 UP 干员 | CC BY-NC-SA 4.0 |
+| [PRTS Wiki](https://prts.wiki/) | 明日方舟已公布活动的时间、活动与卡池横幅（仅使用其公开 API）、卡池 UP 干员 | CC BY-NC-SA 4.0 |
 
 第三方代码与字体的版权声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 

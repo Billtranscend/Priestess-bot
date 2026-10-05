@@ -56,7 +56,7 @@ TABLES = (
     "ActivityWeeklyTaskTable",
     "ActivityWeeklyTaskMileStoneTable",
 )
-INDEX_SCHEMA = 11  # bump to force a rebuild when the index layout changes
+INDEX_SCHEMA = 12  # bump to force a rebuild when the index layout changes
 # Enemy resistance attribute ids (AttributeShowConfigTable), in the in-game display order.
 ENEMY_RESISTANCES = ((94, "物理"), (98, "灼热"), (97, "电磁"), (96, "寒冷"), (95, "自然"), (99, "超域"))
 TOWER_DIFFICULTIES = {"1": "普通", "2": "困难", "3": "残酷"}
@@ -479,7 +479,8 @@ def build_calendar(load, text) -> dict:
     for activity_id, row in load("ActivityTable").items():
         span, name = window(row.get("timeId", "")), text(row.get("name"))
         if span and name:
-            activities.append({"id": activity_id, "name": name, "open": span[0], "close": span[1]})
+            # tab / colour: the banner the game shows on the activity's tab (sprites/activity/<tab>.png) and its accent colour
+            activities.append({"id": activity_id, "name": name, "open": span[0], "close": span[1], "tab": row.get("tabImg") or "", "color": row.get("tabImgColor") or ""})
 
     pools = []
     for kind, table, up_key, names in (("char", "GachaCharPoolTable", "upCharIds", chars), ("weapon", "GachaWeaponPoolTable", "upWeaponIds", items)):
@@ -670,6 +671,10 @@ def build_equip_sets(load, text, maps) -> dict:
             "pieces": pieces,
         }
     return sets
+
+
+def activity_banner_url(tab: str) -> str:
+    return f"{IMAGE_BASE}/activity/{tab}.png"
 
 
 def equip_icon_url(icon_id: str) -> str:

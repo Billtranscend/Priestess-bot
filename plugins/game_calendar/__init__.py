@@ -11,12 +11,16 @@ at night are announced when the quiet hours end.
 
 Endfield data is the calendar of the wiki index (AKEData's unpacked ActivityTable); Arknights data
 is fetched by arknights.py (game tables, plus the activities PRTS Wiki has already recorded).
+Each game's pictures follow that game's own look (themes.py), and every activity row shows the
+activity's own banner (Endfield: the game's tab picture from AKEData; Arknights: the announcement
+banner from PRTS Wiki), downloaded once and kept in the plugin's data directory.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import re
 import time
@@ -25,6 +29,7 @@ from datetime import datetime, timedelta
 from html import escape
 from typing import Callable
 
+import httpx
 from nonebot import get_bots, get_driver, logger, on_command, on_regex, require
 from nonebot.adapters import Message
 from nonebot.adapters.onebot.v11 import Bot, MessageSegment
@@ -45,12 +50,14 @@ import nonebot_plugin_localstore as store
 from nonebot_plugin_alconna import UniMessage, message_reaction
 from nonebot_plugin_apscheduler import scheduler
 from nonebot_plugin_skland.config import GACHA_DATA_PATH
+from nonebot_plugin_skland.data_source import ef_gacha_pool_data
 
 from plugins import ef_theme
 from plugins import endfield_guide as guide
 from plugins import endfield_wiki as wiki
+from plugins.endfield_wiki import data as wiki_data
 
-from . import arknights
+from . import arknights, themes
 
 __plugin_meta__ = PluginMetadata(
     name="Game calendar",
@@ -63,6 +70,14 @@ CN = guide.CN
 WIDTH = 1000
 STATE_FILE = store.get_plugin_data_file("announced.json")
 ARKNIGHTS_FILE = store.get_plugin_data_file("arknights.json")
+POOL_ART_FILE = store.get_plugin_data_file("endfield_pools.json")  # pool id -> banner URL answers of the official pool page
+POOL_ART_AGE = 6 * 3600  # how long an answer (also "no banner yet") is kept
+POOL_CONTENT_URL = "https://ef-webview.hypergryph.com/api/content"  # the game's own pool page; public
+ART_DIR = store.get_plugin_data_dir() / "img"  # downloaded activity and pool banners
+ART_ATTEMPTS = 3
+ART_LIMIT = 4 * 1024 * 1024  # bytes; anything larger is not a banner
+COLOR = re.compile(r"#[0-9a-fA-F]{6}")
+SPRITE_NAME = re.compile(r"[A-Za-z0-9_]+")
 SEND_GAP = 6.0  # seconds between groups
 CHECK_MINUTES = 5
 ARKNIGHTS_REFRESH_MINUTES = 30
@@ -127,12 +142,19 @@ def _endfield() -> dict:
         if start and row.get("name"):
             lowered = row.get("id", "").lower()
             kind = next((label for prefix, label in ENDFIELD_KINDS if lowered.startswith(prefix)), "")
-            rows.append({"name": row["name"], "kind": kind, "start": start, "end": _parse(row.get("close", ""))})
+            tab, color = row.get("tab") or "", row.get("color") or ""
+            rows.append(
+                {
+                    "name": row["name"], "kind": kind, "start": start, "end": _parse(row.get("close", "")),
+                    "art": wiki_data.activity_banner_url(tab) if SPRITE_NAME.fullmatch(tab) else "",
+                    "color": color if COLOR.fullmatch(color) else "",
+                }
+            )
     pool_rows = []
     for row in calendar.get("pools") or []:
         start, end = _parse(row.get("open", "")), _parse(row.get("close", ""))
         if start and end:
-            pool_rows.append({"name": row["name"], "kind": "武器" if row.get("kind") == "weapon" else "角色", "up": row.get("up") or [], "start": start, "end": end})
+            pool_rows.append({"key": row.get("id", ""), "name": row["name"], "kind": "武器" if row.get("kind") == "weapon" else "角色", "up": row.get("up") or [], "start": start, "end": end})
     return {"activities": _unique(rows), "pools": pool_rows, "source": f'AKEData 游戏解包（版本 {index.get("version", "")}）'}
 
 
@@ -140,10 +162,17 @@ def _arknights() -> dict:
     index = arknights.load(ARKNIGHTS_FILE)
     moment = lambda seconds: datetime.fromtimestamp(seconds, CN)
     rows = [
-        {"name": a["name"], "kind": a["kind"], "start": moment(a["start"]), "end": moment(a["end"]), "aliases": a.get("aliases") or [], "alt_starts": [moment(t) for t in a.get("alt_starts") or []]}
+        {
+            "name": a["name"], "kind": a["kind"], "start": moment(a["start"]), "end": moment(a["end"]),
+            "aliases": a.get("aliases") or [], "alt_starts": [moment(t) for t in a.get("alt_starts") or []], "art": a.get("image") or "",
+        }
         for a in index.get("activities") or []
     ]
-    pool_rows = [{"name": p["name"], "kind": p["kind"], "up": p["up"], "start": moment(p["start"]), "end": moment(p["end"])} for p in index.get("pools") or []]
+    images = index.get("pool_images") or {}
+    pool_rows = [
+        {"key": p["id"], "name": p["name"], "kind": p["kind"], "up": p["up"], "start": moment(p["start"]), "end": moment(p["end"]), "art": images.get(p["id"], "")}
+        for p in index.get("pools") or []
+    ]
     return {"activities": _unique(rows), "pools": pool_rows, "source": "ArknightsGameResource 游戏解包与 PRTS Wiki"}
 
 
@@ -154,10 +183,11 @@ class Game:
     kicker: str
     command: str
     load: Callable[[], dict]
+    theme: themes.EndfieldTheme | themes.ArknightsTheme
 
 
-ENDFIELD = Game("endfield", "终末地", "Endfield", "/zmd活动", _endfield)
-ARKNIGHTS = Game("arknights", "明日方舟", "Arknights", "/mrfz活动", _arknights)
+ENDFIELD = Game("endfield", "终末地", "Endfield", "/zmd活动", _endfield, themes.ENDFIELD)
+ARKNIGHTS = Game("arknights", "明日方舟", "Arknights", "/mrfz活动", _arknights, themes.ARKNIGHTS)
 GAMES = (ENDFIELD, ARKNIGHTS)
 
 
@@ -190,15 +220,6 @@ def _span(delta: timedelta) -> str:
     return f"{hours} 小时 {minutes % 60} 分" if hours else f"{minutes % 60} 分钟"
 
 
-def _tag(text: str, style: str = "") -> str:
-    return f'<span class="ef-tag {style}">{escape(text)}</span>' if text else ""
-
-
-def _card(title: str, body: str, note: str = "") -> str:
-    small = f'<small class="cjk">{note}</small>' if note else ""
-    return f'<div class="ef-sec"><h3>{title}{small}</h3>{body}</div>'
-
-
 def _deadline(end: datetime | None, now: datetime) -> str:
     """Right-hand cell of a row: the deadline, and how long is left."""
     if end is None:
@@ -207,22 +228,31 @@ def _deadline(end: datetime | None, now: datetime) -> str:
     return f'<div class="dl"><b>{_moment(end)} 截止</b><span class="{"hot" if left < SOON else ""}">还剩 {_span(left)}</span></div>'
 
 
-def _open_rows(items: list[dict], now: datetime) -> str:
-    return "".join(f'<div class="row"><div class="nm">{_tag(a["kind"])}<b>{escape(a["name"])}</b></div>{_deadline(a["end"], now)}</div>' for a in items)
+def _art_box(src: str, kind: str = "") -> str:
+    return f"<div class=\"art{' ' + kind if kind else ''}\" style=\"background-image:url('{escape(src)}')\"></div>" if src else ""
 
 
-def _upcoming_rows(items: list[dict], now: datetime) -> str:
+def _row(theme, activity: dict, right: str, art: dict[str, str]) -> str:
+    """One activity: kind and name, its banner when there is one, then the deadline cell."""
+    src, color = art.get(activity["key"], ""), activity.get("color") or ""
+    classes = "row" + (" pic" if src else "") + (" tint" if color else "")
+    tint = f' style="--c:{color}"' if color else ""
+    return f'<div class="{classes}"{tint}><div class="nm">{theme.tag(activity["kind"])}<b>{escape(activity["name"])}</b></div>{_art_box(src)}{right}</div>'
+
+
+def _open_rows(theme, items: list[dict], now: datetime, art: dict[str, str]) -> str:
+    return "".join(_row(theme, a, _deadline(a["end"], now), art) for a in items)
+
+
+def _upcoming_rows(theme, items: list[dict], now: datetime, art: dict[str, str]) -> str:
     rows = ""
     for a in items:
         until = f'{_moment(a["end"])} 截止 · 持续 {_span(a["end"] - a["start"])}' if a["end"] else "常驻开放"
-        rows += (
-            f'<div class="row"><div class="nm">{_tag(a["kind"])}<b>{escape(a["name"])}</b></div>'
-            f'<div class="dl"><b>{_moment(a["start"])} 开启</b><span>{until}</span></div></div>'
-        )
+        rows += _row(theme, a, f'<div class="dl"><b>{_moment(a["start"])} 开启</b><span>{until}</span></div>', art)
     return rows
 
 
-def _pool_rows(items: list[dict], now: datetime) -> str:
+def _pool_rows(theme, items: list[dict], now: datetime, art: dict[str, str]) -> str:
     rows = ""
     for p in items:
         up = f'<small>UP：{escape("、".join(p["up"]))}</small>' if p["up"] else ""
@@ -231,64 +261,40 @@ def _pool_rows(items: list[dict], now: datetime) -> str:
         else:
             right = _deadline(p["end"], now)
         name = f'<b>{escape(p["name"])}</b>' if p["name"] != p["kind"] else ""
-        rows += f'<div class="row"><div class="nm">{_tag(p["kind"], "y")}{name}{up}</div>{right}</div>'
+        src = art.get(p["key"], "")
+        rows += f'<div class="row{" pic" if src else ""}"><div class="nm">{theme.tag(p["kind"], True)}{name}{up}</div>{_art_box(src, "pool")}{right}</div>'
     return rows
 
 
 # ── pages ───────────────────────────────────────────────────────────────
 
-CSS = """
-body { width: %dpx; padding: 26px; }
-.row { display: flex; align-items: center; gap: 16px; padding: 12px 16px; border-top: 1px solid var(--ef-line-2); }
-.row:first-of-type { border-top: 0; }
-.nm { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.nm b { font-size: 21px; font-weight: 900; }
-.nm small { flex-basis: 100%%; font-size: 15px; color: var(--ef-sub); }
-.nm .ef-tag { flex: none; }
-.dl { flex: none; text-align: right; }
-.dl b { display: block; font-size: 19px; font-weight: 700; }
-.dl b.perm { font-size: 16px; color: var(--ef-sub); font-weight: 400; }
-.dl span { display: inline-block; margin-top: 3px; font-size: 14px; color: var(--ef-sub); }
-.dl span.hot { color: #fff; background: var(--ef-red); padding: 0 7px; font-weight: 700; }
-/* opening notice */
-.hero { margin-top: 16px; background: var(--ef-panel); border: 2px solid var(--ef-ink); border-left: 12px solid var(--ef-yellow); padding: 18px 22px 20px; }
-.hero .hk { display: flex; align-items: center; gap: 10px; font-size: 15px; color: var(--ef-sub); }
-.hero .hk i { font-style: normal; font-weight: 900; font-size: 15px; padding: 1px 10px; background: var(--ef-ink); color: var(--ef-yellow); letter-spacing: 2px; }
-.hero h2 { margin-top: 8px; font-size: 46px; font-weight: 900; line-height: 1.2; }
-.hero .end { margin-top: 14px; display: flex; align-items: stretch; border: 2px solid var(--ef-ink); }
-.hero .end span { flex: none; display: flex; align-items: center; padding: 0 18px; background: var(--ef-ink); color: var(--ef-yellow); font-size: 20px; font-weight: 900; letter-spacing: 4px; }
-.hero .end b { flex: 1; padding: 8px 18px; background: var(--ef-yellow); font-family: var(--ef-num), var(--ef-cjk); font-weight: 700; font-size: 38px; line-height: 1.2; letter-spacing: 1px; }
-.hero .end em { flex: none; display: flex; align-items: center; padding: 0 18px; font-style: normal; font-size: 18px; font-weight: 700; background: #fff; border-left: 2px solid var(--ef-ink); }
-.hero .from { margin-top: 10px; font-size: 16px; color: var(--ef-sub); }
-"""
-
-
 def _page(game: Game, source: str, head: str, body: str) -> str:
-    foot = ef_theme.foot(f"时间均为北京时间 · 数据来自 {escape(source)}，以游戏内公告为准<br>活动日历发 {game.command}")
-    return f'<!doctype html><html><head><meta charset="utf-8"><style>{ef_theme.css()}{CSS % WIDTH}</style></head><body class="ef">{head}{body}{foot}</body></html>'
+    theme = game.theme
+    foot = theme.foot(f"时间均为北京时间 · 数据来自 {escape(source)}，以游戏内公告为准<br>活动日历发 {game.command}")
+    return f'<!doctype html><html><head><meta charset="utf-8"><style>{theme.css(WIDTH)}</style></head><body class="{theme.body_class}">{head}{body}{foot}</body></html>'
 
 
-def calendar_html(game: Game, now: datetime) -> str:
-    data = game.load()
+def calendar_html(game: Game, now: datetime, art: dict[str, str] | None = None) -> str:
+    data, theme, art = game.load(), game.theme, art or {}
     current, soon, pool_rows = open_now(data["activities"], now), upcoming(data["activities"], now), current_pools(data["pools"], now)
-    head = ef_theme.head(
+    head = theme.head(
         f"{game.kicker} · Event Calendar",
         f"{game.name} <em>活动日历</em>",
         f"{now:%Y/%m/%d} 周{WEEKDAYS[now.weekday()]} {now:%H:%M} · 北京时间",
         f"OPEN<b>{len(current)}</b>",
     )
-    body = _card("正在开放", _open_rows(current, now) or '<div class="ef-empty">当前没有限时活动</div>', f"{len(current)} 个限时活动 · 按截止时间排序")
-    body += _card("即将开启", _upcoming_rows(soon, now) or f'<div class="ef-empty">未来 {UPCOMING_DAYS} 天暂无已公布的新活动</div>', f"未来 {UPCOMING_DAYS} 天")
+    body = theme.card("正在开放", _open_rows(theme, current, now, art) or theme.empty("当前没有限时活动"), f"{len(current)} 个限时活动 · 按截止时间排序")
+    body += theme.card("即将开启", _upcoming_rows(theme, soon, now, art) or theme.empty(f"未来 {UPCOMING_DAYS} 天暂无已公布的新活动"), f"未来 {UPCOMING_DAYS} 天")
     if pool_rows:
-        body += _card("卡池", _pool_rows(pool_rows, now), "寻访")
+        body += theme.card("卡池", _pool_rows(theme, pool_rows, now, art), "寻访")
     return _page(game, data["source"], head, body)
 
 
-def notice_html(game: Game, opened: list[dict], now: datetime) -> str:
+def notice_html(game: Game, opened: list[dict], now: datetime, art: dict[str, str] | None = None) -> str:
     """The opening notice: each new activity as a large plate with its deadline, then what else is running."""
-    data = game.load()
+    data, theme, art = game.load(), game.theme, art or {}
     keys = {a["key"] for a in opened}
-    head = ef_theme.head(
+    head = theme.head(
         f"{game.kicker} · Event Notice",
         f"{game.name} <em>活动开启</em>",
         f"{now:%Y/%m/%d} 周{WEEKDAYS[now.weekday()]} · 北京时间",
@@ -300,21 +306,110 @@ def notice_html(game: Game, opened: list[dict], now: datetime) -> str:
             end = f'<div class="end"><span>截止</span><b>{_moment(a["end"])}</b><em>还剩 {_span(a["end"] - now)}</em></div>'
         else:
             end = '<div class="end"><span>截止</span><b>常驻开放</b></div>'
+        src = art.get(a["key"], "")
         body += (
-            f'<div class="hero"><div class="hk"><i>已开启</i>{_tag(a["kind"])}</div><h2>{escape(a["name"])}</h2>{end}'
+            f'<div class="hero{" pic" if src else ""}">{_art_box(src)}<div class="hk"><i>已开启</i>{theme.tag(a["kind"])}</div><h2>{escape(a["name"])}</h2>{end}'
             f'<div class="from">{_moment(a["start"])} 开启</div></div>'
         )
     others = [a for a in open_now(data["activities"], now) if a["key"] not in keys]
     if others:
-        body += _card("同时进行中", _open_rows(others, now), "按截止时间排序")
+        body += theme.card("同时进行中", _open_rows(theme, others, now, art), "按截止时间排序")
     soon = [a for a in upcoming(data["activities"], now, 7) if a["key"] not in keys]
     if soon:
-        body += _card("即将开启", _upcoming_rows(soon, now), "未来 7 天")
+        body += theme.card("即将开启", _upcoming_rows(theme, soon, now, art), "未来 7 天")
     return _page(game, data["source"], head, body)
 
 
 async def _picture(html: str) -> bytes:
     return await ef_theme.render_page(html, WIDTH, height=600, template_path=wiki.DATA_DIR.as_uri())
+
+
+async def _banner(url: str) -> str:
+    """file:// URI of a banner, downloaded on first use; "" when it cannot be had (the row then shows none)."""
+    suffix = ".png" if url.lower().split("?")[0].endswith(".png") else ".jpg"
+    path = ART_DIR / (hashlib.sha1(url.encode()).hexdigest()[:20] + suffix)
+    if not path.exists():
+        ART_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+        for _ in range(ART_ATTEMPTS):  # a fresh connection each time: one of the wiki's CDN nodes does not answer this host
+            try:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(30, connect=8), follow_redirects=True, headers={"User-Agent": arknights.USER_AGENT}) as client:
+                    response = await client.get(url)
+                response.raise_for_status()
+                if not response.headers.get("content-type", "").startswith("image/") or len(response.content) > ART_LIMIT:
+                    return ""
+                tmp = path.with_suffix(".part")
+                tmp.write_bytes(response.content)
+                tmp.replace(path)
+                break
+            except httpx.HTTPError:
+                continue
+        else:
+            logger.info("Activity banner unavailable; the row is drawn without it")
+            return ""
+    return path.as_uri()
+
+
+async def _banners(items: list[dict]) -> dict[str, str]:
+    """Activity key -> local banner for the activities that have one."""
+    wanted = [a for a in items if a.get("art")]
+    sources = await asyncio.gather(*(_banner(a["art"]) for a in wanted))
+    return {a["key"]: src for a, src in zip(wanted, sources) if src}
+
+
+def _pool_cache() -> dict:
+    try:
+        return json.loads(POOL_ART_FILE.read_text("utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+async def _endfield_pool_url(pool_id: str) -> str:
+    """Banner of an Endfield pool: the table nonebot-plugin-skland keeps, else the game's own pool page (current pools only)."""
+    known = ef_gacha_pool_data.get_pool(pool_id) if getattr(ef_gacha_pool_data, "pool_table", None) else None
+    if known and (known.up6_image or known.rotate_image):
+        return known.up6_image or known.rotate_image
+    cache = _pool_cache()
+    answer = cache.get(pool_id)
+    if answer and time.time() - answer.get("ts", 0) < POOL_ART_AGE:
+        return answer.get("url", "")
+    url = ""
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.get(POOL_CONTENT_URL, params={"lang": "zh-cn", "pool_id": pool_id, "server_id": "1"})
+        pool = (response.json().get("data") or {}).get("pool") or {}
+        url = pool.get("up6_image") or pool.get("rotate_image") or ""
+    except (httpx.HTTPError, ValueError):
+        return ""  # not remembered: asked again next time
+    cache[pool_id] = {"url": url, "ts": time.time()}
+    POOL_ART_FILE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    tmp = POOL_ART_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(cache, ensure_ascii=False), "utf-8")
+    tmp.chmod(0o600)
+    tmp.replace(POOL_ART_FILE)
+    return url
+
+
+async def _pool_banners(game: Game, pool_rows: list[dict]) -> dict[str, str]:
+    """Pool key -> local banner."""
+    if game.key == "endfield":
+        urls = [await _endfield_pool_url(p["key"]) for p in pool_rows]  # one at a time: each answer is added to the same cache file
+    else:
+        urls = [p.get("art", "") for p in pool_rows]
+    wanted = [(p, url) for p, url in zip(pool_rows, urls) if url and url.startswith("https://")]
+    sources = await asyncio.gather(*(_banner(url) for _, url in wanted))
+    return {p["key"]: src for (p, _), src in zip(wanted, sources) if src}
+
+
+async def calendar_picture(game: Game, now: datetime) -> bytes:
+    data = game.load()
+    art = await _banners(open_now(data["activities"], now) + upcoming(data["activities"], now))
+    art.update(await _pool_banners(game, current_pools(data["pools"], now)))
+    return await _picture(calendar_html(game, now, art))
+
+
+async def notice_picture(game: Game, opened: list[dict], now: datetime) -> bytes:
+    items = game.load()["activities"]
+    return await _picture(notice_html(game, opened, now, await _banners(opened + open_now(items, now) + upcoming(items, now, 7))))
 
 
 # ── opening notices ─────────────────────────────────────────────────────
@@ -397,7 +492,7 @@ async def _check_game(game: Game, state: dict[str, list[str]], now: datetime) ->
     if not fresh or _quiet(now):
         return
     started = time.time()
-    stats = await _broadcast(await _picture(notice_html(game, fresh, now)))
+    stats = await _broadcast(await notice_picture(game, fresh, now))
     if stats["ok"]:  # nothing delivered (bot offline): try again at the next check
         state[game.key] = sorted(announced | {key for a in fresh for key in a["keys"]})
         _save_state(state)
@@ -456,7 +551,7 @@ async def _(words: dict = RegexDict()) -> None:
     try:
         now = datetime.now(CN)
         for game in ready:
-            await UniMessage.image(raw=await _picture(calendar_html(game, now))).send()
+            await UniMessage.image(raw=await calendar_picture(game, now)).send()
     except MatcherException:
         raise
     except Exception as e:
@@ -477,5 +572,5 @@ async def _(arg: Message = CommandArg()) -> None:
         await preview_cmd.finish("没有可预览的活动")
     await _react(REACTION_PROCESSING)
     moment = max(now, sample[0]["start"])  # as it will look at the opening
-    await UniMessage.image(raw=await _picture(notice_html(game, sample, moment))).send()
+    await UniMessage.image(raw=await notice_picture(game, sample, moment)).send()
     await _react(REACTION_DONE)

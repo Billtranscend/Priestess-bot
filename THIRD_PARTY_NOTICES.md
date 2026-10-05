@@ -51,7 +51,9 @@ AKEData (https://www.akedata.wiki/) and from Skland; they are not stored in this
 Arknights activity and gacha pool times are downloaded at runtime from
 yuanyan3060/ArknightsGameResource (https://github.com/yuanyan3060/ArknightsGameResource) and from
 the public API of PRTS Wiki (https://prts.wiki/, content under CC BY-NC-SA 4.0); they are not stored
-in this repository either.
+in this repository either. The banners shown in the activity calendar are fetched at runtime as well:
+Endfield activity pictures from AKEData, Endfield pool banners from the game's own pool page, and
+Arknights activity and pool banners from PRTS Wiki. They are cached locally and never committed.
 The screenshots under `docs/images/` and `plugins/skl_help/help.webp` contain names and artwork from
 Arknights and Arknights: Endfield, which are the property of their respective rights holders and
 are shown only to illustrate the bot's output.

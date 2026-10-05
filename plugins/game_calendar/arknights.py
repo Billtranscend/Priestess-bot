@@ -29,7 +29,9 @@ ACTIVITY_URL = f"{RAW}/main/gamedata/excel/activity_table.json"
 GACHA_URL = f"{RAW}/main/gamedata/excel/gacha_table.json"
 POOL_DETAIL_URL = "https://weedy.prts.wiki/gacha_table.json"
 WIKI_API = "https://prts.wiki/api.php"
-WIKI_QUERY = "[[分类:有活动信息的页面]][[活动结束时间::>{since}]]|?名称|?名称缩短|?分类|?活动开始时间|?活动结束时间|sort=活动开始时间|order=asc|limit=50"
+WIKI_QUERY = "[[分类:有活动信息的页面]][[活动结束时间::>{since}]]|?名称|?名称缩短|?分类|?活动开始时间|?活动结束时间|?标题图文件名|sort=活动开始时间|order=asc|limit=50"
+WIKI_POOL_QUERY = "[[分类:国服寻访]][[寻访关闭时间cn::>{since}]]|?寻访名cn|?寻访开启时间cn|?寻访关闭时间cn|sort=寻访开启时间cn|order=asc|limit=30"
+BANNER_WIDTH = 960  # px of the banner thumbnails asked from the wiki (the originals are 1560 x 500, pool banners 1650 x 900)
 WIKI_INTERVAL = 3600
 WIKI_ATTEMPTS = 4  # the wiki's CDN has nodes this host cannot reach; a new connection usually lands on another one
 WIKI_TIMEOUT = httpx.Timeout(30, connect=8)
@@ -99,9 +101,55 @@ def parse_wiki(answer: dict) -> list[dict]:
             continue
         categories = "|".join(c.get("fulltext", "") for c in printouts.get("分类") or [])
         kind = next((label for keyword, label in WIKI_KINDS if keyword in categories), "")
+        banner = (printouts.get("标题图文件名") or [""])[0]
+        banner = banner if isinstance(banner, str) else banner.get("fulltext", "")
         if end - start <= PERMANENT:  # 集成战略 / 生息演算 run for a year: modes, not limited-time activities
-            activities.append({"name": name, "short": (printouts.get("名称缩短") or [name])[0], "kind": kind, "start": start, "end": end})
+            activities.append({"name": name, "short": (printouts.get("名称缩短") or [name])[0], "kind": kind, "start": start, "end": end, "banner_file": banner, "image": ""})
     return sorted(activities, key=lambda a: a["start"])
+
+
+def banner_titles(activities: list[dict]) -> list[str]:
+    return sorted({"文件:" + a["banner_file"].removeprefix("文件:") for a in activities if a.get("banner_file")})
+
+
+def apply_banners(activities: list[dict], answer: dict) -> None:
+    """Fill each activity's `image` with the thumbnail URL from an `imageinfo` answer."""
+    urls = {}
+    normalized = {n.get("to"): n.get("from") for n in (answer.get("query") or {}).get("normalized") or []}
+    for page in (answer.get("query") or {}).get("pages") or []:
+        info = (page.get("imageinfo") or [{}])[0]
+        url = info.get("thumburl") or info.get("url") or ""
+        for title in (page.get("title"), normalized.get(page.get("title"))):
+            if title and url:
+                urls[title] = url
+    for activity in activities:
+        if activity.get("banner_file"):
+            activity["image"] = urls.get("文件:" + activity["banner_file"].removeprefix("文件:"), "")
+
+
+def parse_wiki_pools(answer: dict) -> list[dict]:
+    """Pool banners from an `ask` answer: each result is the banner file itself, with the pool's name and times."""
+    pools = []
+    for title, row in ((answer.get("query") or {}).get("results") or {}).items():
+        printouts = row.get("printouts") or {}
+        try:
+            start, end = int(printouts["寻访开启时间cn"][0]["timestamp"]), int(printouts["寻访关闭时间cn"][0]["timestamp"])
+        except (KeyError, IndexError, TypeError, ValueError):
+            continue
+        pools.append({"name": (printouts.get("寻访名cn") or [""])[0], "start": start, "end": end, "banner_file": title, "image": ""})
+    return pools
+
+
+def pool_images(game_pools: list[dict], wiki_pools: list[dict]) -> dict[str, str]:
+    """Game pool id -> banner URL. Pools are paired by opening time; several opening together are told apart by kind or name."""
+    images = {}
+    for pool in game_pools:
+        together = [w for w in wiki_pools if abs(w["start"] - pool["start"]) <= SAME_MOMENT and w.get("image")]
+        keyword = pool["kind"].removesuffix("寻访")
+        match = next((w for w in together if keyword in w["name"] or w["name"] == pool["name"]), None) or (together[0] if len(together) == 1 else None)
+        if match:
+            images[pool["id"]] = match["image"]
+    return images
 
 
 def _plain(name: str) -> str:
@@ -117,7 +165,7 @@ def merge(game: list[dict], wiki: list[dict]) -> list[dict]:
     names and opening time are kept as `aliases` / `alt_starts`, so an activity announced under one
     of them is not announced again under the other.
     """
-    merged = [{**activity, "aliases": [], "alt_starts": []} for activity in game]
+    merged = [{**activity, "aliases": [], "alt_starts": [], "image": ""} for activity in game]
     for entry in wiki:
         names = {_plain(entry["name"]), _plain(entry["short"])}
         named = lambda a: any(n and (n in _plain(a["name"]) or _plain(a["name"]) in n) for n in names)
@@ -127,11 +175,14 @@ def merge(game: list[dict], wiki: list[dict]) -> list[dict]:
         )
         if match:
             match["aliases"] += [entry["name"], entry["short"]]
+            match["image"] = entry.get("image", "")
             if abs(match["start"] - entry["start"]) > SAME_MOMENT:
                 match["alt_starts"].append(match["start"])
                 match["start"] = entry["start"]
         else:
-            merged.append({"id": "", "name": entry["name"], "kind": entry["kind"], "start": entry["start"], "end": entry["end"], "aliases": [entry["short"]], "alt_starts": []})
+            merged.append(
+                {"id": "", "name": entry["name"], "kind": entry["kind"], "start": entry["start"], "end": entry["end"], "aliases": [entry["short"]], "alt_starts": [], "image": entry.get("image", "")}
+            )
     return sorted(merged, key=lambda a: a["start"])
 
 
@@ -180,8 +231,26 @@ async def refresh(cache_file: Path, character_table: Path) -> str:
                 try:
                     async with httpx.AsyncClient(timeout=WIKI_TIMEOUT, headers={"User-Agent": USER_AGENT}) as wiki_client:
                         response = await wiki_client.get(WIKI_API, params={"action": "ask", "query": WIKI_QUERY.format(since=since), "format": "json"})
-                    response.raise_for_status()
-                    cached["wiki"] = {"fetched": now, "activities": parse_wiki(response.json())}
+                        response.raise_for_status()
+                        found = parse_wiki(response.json())
+                        if titles := banner_titles(found):
+                            response = await wiki_client.get(
+                                WIKI_API,
+                                params={"action": "query", "format": "json", "formatversion": 2, "titles": "|".join(titles), "prop": "imageinfo", "iiprop": "url", "iiurlwidth": BANNER_WIDTH},
+                            )
+                            response.raise_for_status()
+                            apply_banners(found, response.json())
+                        response = await wiki_client.get(WIKI_API, params={"action": "ask", "query": WIKI_POOL_QUERY.format(since=since), "format": "json"})
+                        response.raise_for_status()
+                        found_pools = parse_wiki_pools(response.json())
+                        if titles := banner_titles(found_pools):
+                            response = await wiki_client.get(
+                                WIKI_API,
+                                params={"action": "query", "format": "json", "formatversion": 2, "titles": "|".join(titles), "prop": "imageinfo", "iiprop": "url", "iiurlwidth": BANNER_WIDTH},
+                            )
+                            response.raise_for_status()
+                            apply_banners(found_pools, response.json())
+                    cached["wiki"] = {"fetched": now, "activities": found, "pools": found_pools}
                     done.append(f"wiki: {len(cached['wiki']['activities'])} activities")
                     break
                 except (httpx.HTTPError, ValueError) as e:
@@ -191,6 +260,7 @@ async def refresh(cache_file: Path, character_table: Path) -> str:
     if not done:
         return "unchanged"
     cached["activities"] = merge(cached.get("game_activities") or [], (cached.get("wiki") or {}).get("activities") or [])
+    cached["pool_images"] = pool_images(cached.get("pools") or [], (cached.get("wiki") or {}).get("pools") or [])
     cache_file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     tmp = cache_file.with_suffix(".tmp")
     tmp.write_text(json.dumps(cached, ensure_ascii=False), "utf-8")
