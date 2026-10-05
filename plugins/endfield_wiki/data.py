@@ -3,24 +3,35 @@
 The site publishes unpacked game tables on data.akedata.wiki. We poll its small
 manifest with conditional requests, download only the tables we need when the
 version changes, and reduce them to one compact index.json used for lookups.
+
+Stage enemies also need the scene files next to the tables: the spawner configs
+say which enemy variants a stage spawns and which buffs they are born with, and
+the buff files hold what those buffs do to the enemy's attributes.
 """
 
 from __future__ import annotations
 
 import ast
+import asyncio
 import json
 import operator
 import re
 import shutil
+from collections import Counter
 from html import escape
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
 DATA_BASE = "https://data.akedata.wiki"
 MANIFEST_URL = f"{DATA_BASE}/manifest.json"
 MAPS_URL = "https://www.akedata.wiki/public/CH/maps.json"
+ASSET_INDEX_URL = f"{DATA_BASE}/asset-sync-index.json"  # lists every file under public/Json
+JSON_BASE = f"{DATA_BASE}/public/Json"
+STAGE_FETCHES = 4  # concurrent downloads of the small stage files
+SAFE_PATH = re.compile(r"^(?:SpawnerConfig/\w[\w.-]*|BuffData)/\w[\w.-]*\.json$")
 IMAGE_BASE = f"{DATA_BASE}/public/images/assets/beyond/dynamicassets/gameplay/ui/sprites"
 USER_AGENT = "QQBot-EndfieldWiki/1.0 (non-commercial group bot; data from AKEData)"
 TABLES = (
@@ -56,7 +67,7 @@ TABLES = (
     "ActivityWeeklyTaskTable",
     "ActivityWeeklyTaskMileStoneTable",
 )
-INDEX_SCHEMA = 12  # bump to force a rebuild when the index layout changes
+INDEX_SCHEMA = 13  # bump to force a rebuild when the index layout changes
 # Enemy resistance attribute ids (AttributeShowConfigTable), in the in-game display order.
 ENEMY_RESISTANCES = ((94, "物理"), (98, "灼热"), (97, "电磁"), (96, "寒冷"), (95, "自然"), (99, "超域"))
 TOWER_DIFFICULTIES = {"1": "普通", "2": "困难", "3": "残酷"}
@@ -95,6 +106,52 @@ async def download_tables(client: httpx.AsyncClient, table_path: str, target: Pa
     response = await client.get(MAPS_URL)
     response.raise_for_status()
     (target / "maps.json").write_bytes(response.content)
+    await download_stage_data(client, target)
+
+
+def endgame_stage_ids(series: dict, tower_groups: dict) -> list[str]:
+    stage_ids = [star["gameId"] for group in tower_groups.values() for star in group.get("stars", {}).values() if star.get("gameId")]
+    for row in series.values():
+        if row.get("gameCategory") == "dungeon_highdifficulty":
+            stage_ids += row.get("includeDungeonIds", [])
+    return stage_ids
+
+
+async def download_stage_data(client: httpx.AsyncClient, target: Path) -> None:
+    """Spawner configs of the endgame scenes plus every buff their enemies are born with."""
+
+    def table(name: str) -> dict:
+        return json.loads((target / f"{name}.json").read_text("utf-8"))
+
+    dungeons, enemies = table("DungeonTable"), table("EnemyTable")
+    stage_ids = [s for s in endgame_stage_ids(table("DungeonSeriesTable"), table("SeasonTowerGameGroupTable")) if s in dungeons]
+    scenes = {dungeons[s].get("sceneId") for s in stage_ids}
+    response = await client.get(ASSET_INDEX_URL)
+    response.raise_for_status()
+    files = response.json()["datasets"]["json"]["files"]
+    limit = asyncio.Semaphore(STAGE_FETCHES)
+
+    async def fetch(path: str) -> dict:
+        async with limit:
+            response = await client.get(f"{JSON_BASE}/{quote(path)}")
+            response.raise_for_status()
+        out = target / path
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(response.content)
+        return response.json()
+
+    paths = [p for p in files if SAFE_PATH.match(p) and p.startswith("SpawnerConfig/") and p.split("/")[1] in scenes]
+    configs = await asyncio.gather(*(fetch(p) for p in paths))
+    enemy_ids = {e for s in stage_ids for e in dungeons[s].get("enemyIds", [])}
+    buff_ids = set()
+    for config in configs:
+        for entry in config.get("enemyLibrary") or []:
+            enemy_ids.add(entry.get("enemyId"))
+            buff_ids.update(b.get("buffId") for b in entry.get("bornBuffList") or [])
+    for enemy_id in enemy_ids:
+        buff_ids.update(enemies.get(enemy_id, {}).get("bornBuffs") or [])
+    paths = [p for p in (f"BuffData/{b}.json" for b in sorted(filter(None, buff_ids))) if p in files and SAFE_PATH.match(p)]
+    await asyncio.gather(*(fetch(p) for p in paths))
 
 
 # ── description formatting ─────────────────────────────────────────────
@@ -341,7 +398,7 @@ def build_index(table_dir: Path, version: dict, out_file: Path) -> dict[str, int
         "schema": INDEX_SCHEMA,
         "equip_sets": build_equip_sets(load, text, maps),
         "equip_items": build_equip_items(load, text, maps),
-        "endgame": build_endgame(load, text),
+        "endgame": build_endgame(load, text, maps, table_dir),
         "calendar": build_calendar(load, text),
         "version": version.get("id", ""),
         "published_at": version.get("publishedAt", ""),
@@ -352,34 +409,122 @@ def build_index(table_dir: Path, version: dict, out_file: Path) -> dict[str, int
     tmp.write_text(json.dumps(index, ensure_ascii=False), "utf-8")
     tmp.chmod(0o600)
     tmp.replace(out_file)
-    return {"operators": len(operators), "weapons": len(weapons)}
+    stages = [s for g in index["endgame"]["tower"].values() for s in g["stages"]]
+    stages += [s for m in index["endgame"]["monument"] for g in m["groups"] for s in g["stages"]]
+    foes = [foe for s in stages for foe in s["enemies"]]
+    # "foes_plain" should stay near zero: a jump means the spawner files no longer match the stages.
+    return {"operators": len(operators), "weapons": len(weapons), "foes": len(foes), "foes_plain": sum(1 for f in foes if f.get("plain"))}
 
 
-def build_endgame(load, text) -> dict:
+def build_endgame(load, text, maps: dict, table_dir: Path) -> dict:
     """Stage index for 战争回响 (season tower) and 影拓丰碑 (high-difficulty series)."""
     dungeons, series = load("DungeonTable"), load("DungeonSeriesTable")
     enemies = load("EnemyTemplateDisplayInfoTable")
     enemy_rows, enemy_attrs = load("EnemyTable"), load("EnemyAttributeTemplateTable")
     tower_groups, tower_seasons, tower_buffs = load("SeasonTowerGameGroupTable"), load("SeasonTowerTable"), load("SeasonTowerDungeonTable")
     time_ranges = load("TimeRangeTable")
+    attr_ids = {name: int(key) for key, name in maps["ATTR_MAP_EN"].items()}
+    formulas = {name: int(key) for key, name in maps["MODIFIER_TYPE_MAP"].items()}
+    scene_use = Counter(
+        (dungeons[s].get("sceneId"), level)
+        for s in endgame_stage_ids(series, tower_groups)
+        if s in dungeons
+        for level in set(dungeons[s].get("enemyLevels", []))
+    )
+    spawner_cache: dict[str, list[dict]] = {}
+    buff_cache: dict[str, dict] = {}
 
     def base_name(stage_id: str) -> str:
         return text(dungeons.get(stage_id, {}).get("dungeonName")).split("·")[0].strip()
 
+    def spawners(scene: str) -> list[dict]:
+        if scene not in spawner_cache:
+            folder = table_dir / "SpawnerConfig" / scene
+            spawner_cache[scene] = [json.loads(p.read_text("utf-8")) for p in sorted(folder.glob("*.json"))] if scene and folder.is_dir() else []
+        return spawner_cache[scene]
+
+    def effects(buff_id: str, blackboard: list | None = None) -> tuple[list[dict], dict[int, float]]:
+        if buff_id not in buff_cache:
+            file = table_dir / "BuffData" / f"{buff_id}.json"
+            buff_cache[buff_id] = json.loads(file.read_text("utf-8")) if file.is_file() else {}
+        return buff_effects(buff_cache[buff_id], blackboard, attr_ids, formulas)
+
+    def template_of(enemy_id: str) -> str:
+        return enemy_rows.get(enemy_id, {}).get("templateId") or enemy_id
+
+    def buff(buff_id: str) -> dict:
+        effects(buff_id)
+        return buff_cache[buff_id]
+
+    def scenery(entry: dict) -> bool:
+        """Spawned without a health bar: part of the stage's mechanics, not an enemy to defeat."""
+        born = list(enemy_rows.get(entry["enemyId"], {}).get("bornBuffs") or []) + [b.get("buffId", "") for b in entry.get("bornBuffList") or []]
+        return any(hides_health_bar(buff(buff_id)) for buff_id in born)
+
+    def display(enemy_id: str) -> tuple[str, str]:
+        probe = template_of(enemy_id)
+        name = text(enemies.get(probe, {}).get("name"))
+        if not name:  # no table row: stage-specific variants append suffixes, e.g. eny_0118_klhog_hdg026
+            probe = enemy_id
+            while probe and not (name := text(enemies.get(probe, {}).get("name"))):
+                probe = probe.rpartition("_")[0] if probe.count("_") > 2 else ""
+        return (name, probe) if name else (enemy_id, "")
+
+    def spawned(row: dict, pairs: list[tuple[str, int]]) -> list[dict]:
+        """Spawner library entries of this stage: an enemy variant, its level and the buffs it is born with."""
+        scene, levels = row.get("sceneId", ""), {level for _, level in pairs}
+        templates = {template_of(enemy_id) for enemy_id, _ in pairs}
+        shared = any(scene_use[(scene, level)] > 1 for level in levels)
+        library = []
+        for config in spawners(scene):
+            used = {
+                action.get("libraryKey")
+                for wave in (config.get("waveMap") or {}).values()
+                for group in (wave.get("groupMap") or {}).values()
+                for action in (group.get("actionMap") or {}).values()
+            } - {None, ""}
+            entries = [e for e in config.get("enemyLibrary") or [] if e.get("enemyLevel") in levels and (not used or e.get("key") in used)]
+            # All 战争回响 stages share one scene; there a spawner is this stage's only when the
+            # stage lists everything it spawns.
+            if shared and any(template_of(e["enemyId"]) not in templates for e in entries):
+                continue
+            library += entries
+        return library
+
     def stage(stage_id: str, difficulty: str) -> dict:
         row = dungeons.get(stage_id, {})
+        pairs = list(dict.fromkeys(zip(row.get("enemyIds", []), row.get("enemyLevels", []))))
+        listed = {enemy_id for enemy_id, _ in pairs}
+        # Scenery keeps its level across difficulties, so it is looked up in the whole scene.
+        props = [e for config in spawners(row.get("sceneId", "")) for e in config.get("enemyLibrary") or [] if scenery(e)]
+        library = [e for e in spawned(row, pairs) if not scenery(e)]
+        rows: dict[tuple[str, int], tuple[str, list[dict]]] = {}  # (variant, level) -> (enemy it is shown as, its spawner entries)
+        taken = []
+        for enemy_id, level in pairs:
+            same_level = [e for e in library if e["enemyLevel"] == level]
+            # The stage lists either the exact variant or only the plain enemy its variants derive from.
+            found = [e for e in same_level if e["enemyId"] == enemy_id] or [
+                e for e in same_level if e["enemyId"] not in listed and template_of(e["enemyId"]) == template_of(enemy_id)
+            ]
+            taken += found
+            if not found and any(template_of(e["enemyId"]) == template_of(enemy_id) for e in props):
+                continue  # listed by the game, but it only stands in the stage as scenery
+            for variant in list(dict.fromkeys(e["enemyId"] for e in found)) or [enemy_id]:
+                rows[(variant, level)] = (enemy_id, [e for e in found if e["enemyId"] == variant])
+        for entry in library:  # spawned without being on the stage's enemy list
+            if not any(entry is e for e in taken):
+                rows.setdefault((entry["enemyId"], entry["enemyLevel"]), (entry["enemyId"], []))[1].append(entry)
         foes = []
-        for enemy_id, level in zip(row.get("enemyIds", []), row.get("enemyLevels", [])):
-            name, icon, probe = "", "", enemy_id
-            while not name and probe:  # stage-specific variants append suffixes, e.g. eny_0118_klhog_hdg026
-                name, icon = text(enemies.get(probe, {}).get("name")), probe
-                probe = probe.rpartition("_")[0] if probe.count("_") > 2 else ""
-            foe = {
-                "name": name or enemy_id,
-                "icon": icon if name else "",
-                "level": level,
-                **enemy_stats(enemy_rows.get(enemy_id, {}), enemy_attrs, level),
-            }
+        for (variant, level), (shown, entries) in rows.items():
+            born: list[dict] = []
+            for entry in entries:  # one row per variant as on the AKEData site: the buffs of all its spawns, each buff once
+                born += [b for b in entry.get("bornBuffList") or [] if b.get("buffId") not in {x.get("buffId") for x in born}]
+            name, icon = display(shown)
+            enemy = enemy_rows.get(variant, {})
+            applied = [effects(b) for b in enemy.get("bornBuffs") or []] + [effects(b.get("buffId", ""), b.get("blackboard")) for b in born]
+            foe = {"name": name, "icon": icon, "level": level, **enemy_stats(enemy, enemy_attrs, level, applied)}
+            if not entries:  # not placed by a spawner (summoned in the fight): the enemy's own values only
+                foe["plain"] = True
             if foe not in foes:
                 foes.append(foe)
         buff = text(tower_buffs.get(stage_id, {}).get("specialBuffDesc"))
@@ -434,28 +579,94 @@ def build_endgame(load, text) -> dict:
     return {"tower": tower, "tower_seasons": seasons, "monument": monument}
 
 
-def enemy_stats(row: dict, templates: dict, level: int) -> dict:
-    """HP / ATK / DEF at the stage level with the enemy's own modifiers, plus non-zero resistances.
+def _blackboard(rows: list | None) -> dict[str, float]:
+    """Blackboard rows keep their number under one of several typed keys."""
+    values = {}
+    for row in rows or []:
+        values[row.get("key")] = next((row[k] for k in ("valueFloat", "valueDouble", "valueInt", "valueLong", "value") if row.get(k) is not None), 0.0)
+    return values
 
-    attrModifiers: modifierType 1 adds a percentage (-0.5 = -50%), modifierType 4 multiplies.
-    Stage-wide buffs (special_buff text) are not applied.
+
+def buff_effects(buff: dict, blackboard: list | None, attr_ids: dict[str, int], formulas: dict[str, int]) -> tuple[list[dict], dict[int, float]]:
+    """What a buff does to its owner's attributes for as long as it lasts: (modifiers, raw overrides).
+
+    Modifiers have the shape of EnemyTable.attrModifiers. Overrides replace the raw attribute
+    outright, which is how stages level all elemental resistances to one value. `blackboard`
+    holds the values the spawner passes in place of the buff's defaults.
+    """
+    values = {**_blackboard(buff.get("blackboard")), **_blackboard(blackboard)}
+
+    def number(param: dict) -> float:
+        if param.get("useBlackboardKey") and param.get("blackboardKey"):
+            return values.get(param["blackboardKey"], param.get("value", 0.0))
+        return param.get("value", 0.0)
+
+    modifiers = []
+    for mod in (buff.get("attributeModifier") or {}).get("attributeModifiers") or []:
+        attr, formula = attr_ids.get(mod.get("attributeType")), formulas.get(mod.get("formulaItem"))
+        if attr is not None and formula is not None:
+            modifiers.append({"attrType": attr, "modifierType": formula, "attrValue": number(mod.get("param") or {})})
+    overrides = {}
+    for event in buff.get("buffEventAction") or []:
+        if event.get("buffEvent") != "DuringBuffEnable":
+            continue
+        for group in event.get("actions") or []:
+            for action in group.get("actionData") or []:
+                if "OverrideRawAttributeAction" not in action.get("$type", ""):
+                    continue
+                for item in action.get("attributeOverrides") or []:
+                    attr = attr_ids.get(item.get("attributeType"))
+                    if attr is not None:
+                        overrides[attr] = number(item.get("overrideValue") or {})
+    return modifiers, overrides
+
+
+# modifierType -> operation, in the order the AKEData site applies them: Base* types first, a
+# percentage is x(1 + value) and several of them multiply. The site is the reference these numbers
+# are checked against, so stacking follows it exactly.
+MODIFIER_STEPS = ((5, "add"), (6, "percent"), (7, "add"), (8, "factor"), (3, "add"), (4, "factor"), (0, "add"), (1, "percent"))
+
+
+def hides_health_bar(buff: dict) -> bool:
+    """A permanent buff that force-hides its owner's health bar."""
+    return buff.get("lifeType") == "Infinity" and any(
+        "ForceHideHeadBarAction" in action.get("$type", "")
+        for event in buff.get("buffEventAction") or []
+        if event.get("buffEvent") == "DuringBuffEnable"
+        for group in event.get("actions") or []
+        for action in group.get("actionData") or []
+    )
+
+
+def modified(value: float, modifiers: list[dict], attr: int) -> float:
+    """Apply the attribute modifiers of one attribute (see MODIFIER_STEPS)."""
+    for kind, step in MODIFIER_STEPS:
+        for mod in modifiers:
+            if mod.get("attrType") != attr or mod.get("modifierType") != kind:
+                continue
+            amount = mod.get("attrValue", 0.0)
+            value = value + amount if step == "add" else value * (1 + amount) if step == "percent" else value * amount
+    return value
+
+
+def enemy_stats(row: dict, templates: dict, level: int, effects: list[tuple[list[dict], dict[int, float]]] | tuple = ()) -> dict:
+    """HP / ATK / DEF and non-zero resistances of an enemy at the stage level.
+
+    Counts the enemy's own attrModifiers and the `effects` (see buff_effects) of the buffs it is
+    born with in the stage. Stage-wide buffs (special_buff text) are not applied.
     """
     template = templates.get(row.get("attrTemplateId", ""), {})
     per_level = template.get("levelDependentAttributes") or []
     if not 0 < level <= len(per_level):
         return {}
-    base = {a["attrType"]: a["attrValue"] for a in per_level[level - 1]["attrs"]}
-    fixed = {a["attrType"]: a["attrValue"] for a in (template.get("levelIndependentAttributes") or {}).get("attrs", [])}
-    stats = {}
-    for attr, key in ((1, "hp"), (2, "atk"), (3, "def")):
-        value, percent, factor = base.get(attr, 0.0), 0.0, 1.0
-        for mod in row.get("attrModifiers") or []:
-            if mod.get("attrType") == attr and mod.get("modifierType") == 1:
-                percent += mod.get("attrValue", 0.0)
-            elif mod.get("attrType") == attr and mod.get("modifierType") == 4:
-                factor *= mod.get("attrValue", 1.0)
-        stats[key] = round(value * (1 + percent) * factor)
-    stats["res"] = [[label, round(fixed[attr])] for attr, label in ENEMY_RESISTANCES if fixed.get(attr)]
+    base = {a["attrType"]: a["attrValue"] for a in (template.get("levelIndependentAttributes") or {}).get("attrs", [])}
+    base.update({a["attrType"]: a["attrValue"] for a in per_level[level - 1]["attrs"]})
+    modifiers = list(row.get("attrModifiers") or [])
+    for buff_modifiers, overrides in effects:
+        modifiers += buff_modifiers
+        base.update(overrides)
+    stats = {key: round(modified(base.get(attr, 0.0), modifiers, attr)) for attr, key in ((1, "hp"), (2, "atk"), (3, "def"))}
+    stats["res"] = [[label, value] for attr, label in ENEMY_RESISTANCES if (value := round(modified(base.get(attr, 0.0), modifiers, attr)))]
     return stats
 
 

@@ -274,15 +274,16 @@ async def _enemy_table(enemies: list[dict]) -> str:
         thumb = f'<img src="{escape(icon)}">' if icon else '<i class="ph"></i>'
         res = "　".join(f'{label} <b>{value}</b>' for label, value in e.get("res", [])) or '<span class="dim">无</span>'
         rows.append(
-            f'<tr><td class="ei">{thumb}</td><td class="fe">{escape(e["name"])}</td><td class="lv">Lv{e["level"]}</td><td class="num">{e.get("hp", 0):,}</td>'
+            f'<tr><td class="ei">{thumb}</td><td class="fe">{escape(e["name"])}{" *" if e.get("plain") else ""}</td><td class="lv">Lv{e["level"]}</td><td class="num">{e.get("hp", 0):,}</td>'
             f'<td class="num">{e.get("atk", 0):,}</td>' + ("" if same_def else f'<td class="num">{e.get("def", 0):,}</td>') + f'<td class="rs">{res}</td></tr>'
         )
     head = "<th></th><th>敌人</th><th>等级</th><th class=\"num\">生命值</th><th class=\"num\">攻击力</th>" + ("" if same_def else "<th class=\"num\">防御力</th>") + "<th>抗性</th>"
     note = f"防御力均为 {enemies[0].get('def', 0)}；" if same_def else ""
+    plain = "；带 * 的敌人不在关卡的固定刷怪配置中（多为战斗中召唤），按其自身属性显示" if any(e.get("plain") for e in enemies) else ""
     return _box(
         "敌人数值",
         f'<table class="foe"><tr>{head}</tr>{"".join(rows)}</table>'
-        f'<div class="note">{note}数值为该关卡等级下的属性，已计入敌人自身的数值修正，未计入上方的特殊增益；抗性越高，受到该类伤害越少</div>',
+        f'<div class="note">{note}数值为敌人在本关卡内的属性，已计入关卡对生命值、攻击力的加成和对抗性的调整，未计入上方的特殊增益；抗性越高，受到该类伤害越少{plain}</div>',
         f"{len(enemies)} 种",
     )
 
