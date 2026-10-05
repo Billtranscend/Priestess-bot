@@ -1,13 +1,15 @@
 """Endfield endgame stage guides: 战争回响 and 影拓丰碑.
 
 /攻略 <关卡名> [难度]     stage card: mechanics, enemies, 增辉 target, group clear teams, Bilibili videos
-/战争回响                 this week's rotation
-/影拓丰碑                 all series and stages
+/战争回响                 this week's rotation: stages in game order with their covers
+/影拓丰碑 [丰碑名]         every series with its cover; one series: its stages in game order with covers
+/敌人 <关卡|丰碑> [难度]   mechanics and enemy attributes, no teams or videos (/回响敌人: this week's rotation, /丰碑敌人: the current series)
 /攻略统计 退出|加入        opt out of / back into the group clear-team statistics
 /竞速榜                   menu → /回响竞速 [关卡]  /丰碑竞速 [丰碑|关卡]
 
 Stage data comes from the endfield_wiki AKEData index; clear teams from members'
 Skland War Echoes records (collected twice a day); videos from Bilibili search.
+The game's stage order and the series covers also come from Skland (see stages.py).
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ import asyncio
 import contextlib
 import difflib
 import hashlib
+import re
 import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -25,7 +28,7 @@ from nonebot import get_driver, logger, on_command, require
 from nonebot.adapters import Message
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent
 from nonebot.exception import MatcherException
-from nonebot.params import CommandArg
+from nonebot.params import Command, CommandArg
 from nonebot.permission import SUPERUSER
 from nonebot.plugin import PluginMetadata
 
@@ -45,6 +48,7 @@ from plugins import endfield_wiki as wiki
 from plugins.endfield_wiki import data as wiki_data
 from plugins.endfield_wiki.lookup import normalize, to_pinyin
 
+from . import stages
 from .bili import BiliSearch
 from .builds import BuildStore
 from .echoes import ECHO_SCHEMA, EchoStore, speed_ranking, team_stats, usage_rates
@@ -61,6 +65,7 @@ DATA_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
 bili = BiliSearch(DATA_DIR / "videos.json")
 echo_store = EchoStore(DATA_DIR / "echoes.json", DATA_DIR / "optout.json")
 build_store = BuildStore(DATA_DIR / "builds.json")  # read by endfield_wiki for the build statistics on its cards
+covers = stages.Covers(wiki.IMAGE_DIR)
 CN = timezone(timedelta(hours=8))
 WIDTH = 1100
 REACTION_PROCESSING, REACTION_DONE, REACTION_FAIL = "66", "144", "10060"
@@ -69,10 +74,22 @@ DIFFICULTY_WORDS = {
     "苦难": "苦难", "镀层": "苦难", "高难": "苦难",
 }
 BOOST = {"残酷": ("残酷", "增辉"), "苦难": ("苦难", "镀层"), "困难": ("困难",), "普通": ()}
+STAGE_NUMBER = re.compile(r"^第?(\d{1,2})关?$")  # "2" / "第2关": a stage of a 影拓丰碑 series by its number
+ROTATION_WORDS = ("战争回响", "回响", "本周", "本期")
+MONUMENT_WORDS = ("影拓丰碑", "丰碑")
+ENEMY_USAGE = (
+    "只看关卡机制和敌人属性（不含通关阵容和视频）\n"
+    "/敌人 关卡名 [难度]　例：/敌人 暗曜白霆、/敌人 重伤之围 残酷\n"
+    "/敌人 丰碑名　整个丰碑的全部关卡，例：/敌人 幽影刻形\n"
+    "/敌人 丰碑名 序号　例：/敌人 幽影刻形 2\n"
+    "/回响敌人　本期战争回响的三个关卡\n"
+    "/丰碑敌人　当前活动中的丰碑"
+)
 
 guide = on_command("攻略", rule=strict, priority=5, block=True)
 rotation = on_command("战争回响", rule=strict, priority=5, block=True)
 monument_list = on_command("影拓丰碑", rule=strict, priority=5, block=True)
+enemy = on_command("敌人", aliases={"敌人属性", "敌人数值", "回响敌人", "丰碑敌人"}, rule=strict, priority=5, block=True)
 stats_opt = on_command("攻略统计", aliases={"战绩统计"}, rule=strict, priority=5, block=True)
 speed_board = on_command("竞速榜", rule=strict, priority=5, block=True)
 echo_speed = on_command("回响竞速", aliases={"战争回响竞速"}, rule=strict, priority=5, block=True)
@@ -87,8 +104,14 @@ async def _react(emoji: str) -> None:
 
 
 def _endgame() -> dict:
+    """The stage index, with 影拓丰碑 in the game's order (series cover and stage numbers attached)."""
     loaded = wiki._resolver()
-    return loaded[0].get("endgame", {}) if loaded else {}
+    return stages.ordered(loaded[0].get("endgame", {}) if loaded else {}, echo_store.layout())
+
+
+def _version() -> str:
+    loaded = wiki._resolver()
+    return loaded[0].get("version", "") if loaded else ""
 
 
 def _parse_time(value: str) -> datetime | None:
@@ -151,6 +174,43 @@ def _resolve(endgame: dict, query: str) -> tuple[str, object] | None:
     return None
 
 
+def _words(arg: Message) -> tuple[str, str | None, int | None]:
+    """(name, difficulty, stage number) from a command's arguments."""
+    words = arg.extract_plain_text().split()
+    difficulty = next((DIFFICULTY_WORDS[w] for w in words if w in DIFFICULTY_WORDS), None)
+    number = next((int(m.group(1)) for w in words if (m := STAGE_NUMBER.match(w))), None)
+    return "".join(w for w in words if w not in DIFFICULTY_WORDS and not STAGE_NUMBER.match(w)), difficulty, number
+
+
+def _numbered(series: dict) -> str:
+    return "、".join(f"{g['no']}.{g['name']}" for g in series["groups"])
+
+
+async def _foe_icons(groups: list[dict]) -> dict[str, str]:
+    ids = sorted({foe["icon"] for g in groups for s in g["stages"] for foe in s["enemies"] if foe.get("icon")})
+    uris = await asyncio.gather(*(wiki._cached_image(wiki_data.enemy_icon_url(i), f"{i}.png") for i in ids))
+    return dict(zip(ids, uris))
+
+
+def _cover_jobs(series: list[dict], groups: list[dict]) -> list[tuple[str, str, int]]:
+    return [stages.poster(s) for s in series] + [stages.stage_cover(g, wiki_data.stage_cover_url(g)) for g in groups]
+
+
+async def _send_page(matcher, build, fallback: str) -> None:
+    """Render and send a menu page; `build` returns its HTML. Falls back to the plain text."""
+    await _react(REACTION_PROCESSING)
+    try:
+        image = await ef_theme.render_page(await build(), stages.WIDTH, height=300, template_path=wiki.DATA_DIR.as_uri())
+        await UniMessage.image(raw=image).send()
+    except MatcherException:
+        raise
+    except Exception as e:
+        logger.warning(f"Stage menu failed: {type(e).__name__}: {e}")
+        await _react(REACTION_FAIL)
+        await matcher.finish(fallback)
+    await _react(REACTION_DONE)
+
+
 def _video_text(videos) -> str:
     return "\n".join(f"{i}. {v.title[:40]}\nhttps://www.bilibili.com/video/{v.bvid}" for i, v in enumerate(videos, 1))
 
@@ -170,31 +230,135 @@ def _load_echoes() -> dict:
 # ── commands ───────────────────────────────────────────────────────────
 
 
+def _rotation(endgame: dict) -> tuple[dict, dict, list[dict]] | None:
+    """(season, week, stages numbered in the game's order) of the rotation that is open now."""
+    current = _current_week(endgame)
+    if not current:
+        return None
+    season, week = current
+    return season, week, [{**endgame["tower"][g], "no": n} for n, g in enumerate((g for g in week["groups"] if g in endgame["tower"]), 1)]
+
+
+def _upcoming(endgame: dict) -> list[tuple[str, str, list[str]]]:
+    """The next rotation that has not opened yet: (title, opening time, stage names)."""
+    now = datetime.now(CN)
+    for season in endgame.get("tower_seasons", []):
+        for week in season["weeks"]:
+            start = _parse_time(week["open"])
+            names = [endgame["tower"][g]["name"] for g in week["groups"] if g in endgame["tower"]]
+            if start and start > now and names:
+                return [(f"下期 · {week['name'] or '轮换' + str(week['week'])}", f"{start:%m/%d %H:%M}", names)]
+    return []
+
+
 @rotation.handle()
 async def _() -> None:
     endgame = _endgame()
-    current = _current_week(endgame)
+    current = _rotation(endgame)
     if not current:
         await rotation.finish("当前没有开放中的战争回响轮换（数据可能尚未更新）")
-    season, week = current
+    season, week, groups = current
     end = _parse_time(week["close"])
     left = end - datetime.now(CN)
-    names = [endgame["tower"][g]["name"] for g in week["groups"] if g in endgame["tower"]]
+    names = [g["name"] for g in groups]
     lines = [f"战争回响 · {season['name']} · {week['name'] or '轮换' + str(week['week'])}",
              f"剩余 {left.days} 天 {left.seconds // 3600} 小时（{end:%m/%d %H:%M} 轮换）", ""]
     lines += [f"{i}. {n}" for i, n in enumerate(names, 1)]
-    lines += ["", "发送 /攻略 关卡名 查看攻略，例如 /攻略 " + (names[0] if names else "重伤之围") + " 残酷"]
-    await rotation.finish("\n".join(lines))
+    lines += ["", "发送 /攻略 关卡名 查看攻略，例如 /攻略 " + (names[0] if names else "重伤之围") + " 残酷", "只看机制和敌人属性发 /回响敌人"]
+
+    async def build() -> str:
+        art, icons = await asyncio.gather(covers.get(_cover_jobs([], groups)), _foe_icons(groups))
+        return stages.rotation_html(ef_theme, season, week, groups, _upcoming(endgame), art, icons, datetime.now(CN), _version())
+
+    await _send_page(rotation, build, "\n".join(lines))
+
+
+def _monument_text(endgame: dict) -> str:
+    lines = ["影拓丰碑（苦难模式全通即可为该丰碑的蚀刻章镀层；关卡按游戏内顺序）"]
+    lines += [f"【{series['name']}】{_numbered(series)}" for series in endgame.get("monument", [])]
+    if endgame.get("monument"):
+        first = endgame["monument"][0]
+        lines.append(f"\n发送 /攻略 关卡名 苦难 查看攻略，例如 /攻略 {first['groups'][0]['name']} 苦难\n只看机制和敌人属性发 /敌人 {first['name']}")
+    return "\n".join(lines)
 
 
 @monument_list.handle()
-async def _() -> None:
+async def _(arg: Message = CommandArg()) -> None:
     endgame = _endgame()
-    lines = ["影拓丰碑（苦难模式全通即可为该系列蚀刻章镀层）"]
-    for series in endgame.get("monument", []):
-        lines.append(f"【{series['name']}】" + "、".join(g["name"] for g in series["groups"]))
-    lines.append("\n发送 /攻略 关卡名 苦难 查看攻略，例如 /攻略 " + endgame["monument"][-1]["groups"][0]["name"] + " 苦难" if endgame.get("monument") else "")
-    await monument_list.finish("\n".join(lines))
+    monument = endgame.get("monument", [])
+    query = arg.extract_plain_text().strip().removesuffix("丰碑")
+    if not monument:
+        await monument_list.finish("影拓丰碑数据尚未同步，请稍后再试")
+    if not query:
+
+        async def overview() -> str:
+            art = await covers.get(_cover_jobs(monument, []))
+            return stages.overview_html(ef_theme, monument, art, time.time(), _version())
+
+        await _send_page(monument_list, overview, _monument_text(endgame))
+        return
+    found = _resolve(endgame, query)
+    if found and found[0] == "group" and found[1]["mode"] == "战争回响":
+        await monument_list.finish(f"「{found[1]['name']}」是战争回响关卡，本期轮换发 /战争回响")
+    if not found or found[0] == "candidates":
+        hint = f"找到多个：{'、'.join(found[1])}" if found else f"没有找到丰碑「{query}」"
+        await monument_list.finish(hint + "\n\n" + _monument_text(endgame))
+    marked = found[1]["name"] if found[0] == "group" else ""
+    series = found[1] if found[0] == "series" else next(s for s in monument if s["name"] == found[1]["series"])
+
+    async def page() -> str:
+        art, icons = await asyncio.gather(covers.get(_cover_jobs([series], series["groups"])), _foe_icons(series["groups"]))
+        return stages.series_html(ef_theme, series, art, icons, time.time(), _version(), marked)
+
+    await _send_page(monument_list, page, f"影拓丰碑【{series['name']}】（按游戏内顺序）：{_numbered(series)}")
+
+
+@enemy.handle()
+async def _(arg: Message = CommandArg(), command: tuple[str, ...] = Command()) -> None:
+    query, difficulty, number = _words(arg)
+    endgame = _endgame()
+    monument = endgame.get("monument", [])
+    query = query or {"回响敌人": "战争回响", "丰碑敌人": "影拓丰碑"}.get(command[0], "")
+    if not query:
+        await enemy.finish(ENEMY_USAGE)
+    series = None
+    if query in ROTATION_WORDS:
+        current = _rotation(endgame)
+        if not current:
+            await enemy.finish("当前没有开放中的战争回响轮换（数据可能尚未更新）")
+        season, week, groups = current
+        title, scope = "机制与敌人 · <em>本期战争回响</em>", f"{season['name']} · {week['name'] or '轮换' + str(week['week'])}"
+    elif query in MONUMENT_WORDS:
+        series = next((s for s in monument if stages.live(s, time.time())), monument[0] if monument else None)
+        if series is None:
+            await enemy.finish("影拓丰碑数据尚未同步，请稍后再试")
+    else:
+        found = _resolve(endgame, query.removesuffix("丰碑") or query)
+        if not found:
+            await enemy.finish(f"没有找到「{query}」，发 /战争回响 或 /影拓丰碑 查看全部关卡名\n\n{ENEMY_USAGE}")
+        if found[0] == "candidates":
+            await enemy.finish(f"找到多个关卡：{'、'.join(found[1])}\n请输入更完整的名字")
+        if found[0] == "series":
+            series = found[1]
+        else:
+            groups = [found[1]]
+            title, scope = f"机制与敌人 · <em>{escape(found[1]['name'])}</em>", found[1].get("series") or "战争回响"
+    if series is not None:
+        if number and 1 <= number <= len(series["groups"]):
+            groups = [series["groups"][number - 1]]
+            title, scope = f"机制与敌人 · <em>{escape(groups[0]['name'])}</em>", series["name"]
+        else:
+            groups = series["groups"]
+            title, scope = f"机制与敌人 · <em>{escape(series['name'])}</em>", f"影拓丰碑 · 共 {len(groups)} 关"
+    if difficulty and not any(s["difficulty"] == difficulty for g in groups for s in g["stages"]):
+        difficulty = None
+    chips = f"<span>{escape(scope)}</span><span>{escape(difficulty) if difficulty else '全部难度'}</span>"
+    kicker = f"Arknights: Endfield · {groups[0]['mode']}"
+
+    async def build() -> str:
+        return stages.enemies_html(ef_theme, kicker, title, chips, groups, difficulty, await _foe_icons(groups), _version())
+
+    await _send_page(enemy, build, "敌人属性图生成失败，请稍后再试")
 
 
 @stats_opt.handle()
@@ -216,21 +380,20 @@ async def _() -> None:
 
 @guide.handle()
 async def _(bot: Bot, event: MessageEvent, arg: Message = CommandArg()) -> None:
-    words = arg.extract_plain_text().split()
-    difficulty = next((DIFFICULTY_WORDS[w] for w in words if w in DIFFICULTY_WORDS), None)
-    query = "".join(w for w in words if w not in DIFFICULTY_WORDS)
+    query, difficulty, number = _words(arg)
     endgame = _endgame()
     if not query:
-        await guide.finish("用法：/攻略 关卡名 [难度]\n例如 /攻略 重伤之围 残酷、/攻略 幽影刻形 苦难\n本周关卡发 /战争回响，影拓丰碑关卡发 /影拓丰碑")
+        await guide.finish("用法：/攻略 关卡名 [难度]\n例如 /攻略 重伤之围 残酷、/攻略 暗曜白霆 苦难、/攻略 幽影刻形 2\n本周关卡发 /战争回响，影拓丰碑关卡发 /影拓丰碑")
     found = _resolve(endgame, query)
     if not found:
         await guide.finish(f"没有找到「{query}」，发 /战争回响 或 /影拓丰碑 查看全部关卡名")
     kind, target = found
     if kind == "candidates":
         await guide.finish(f"找到多个关卡：{'、'.join(target)}\n请输入更完整的名字")
+    if kind == "series" and number and 1 <= number <= len(target["groups"]):
+        kind, target = "group", target["groups"][number - 1]
     if kind == "series":
-        names = "、".join(g["name"] for g in target["groups"])
-        await guide.finish(f"影拓丰碑系列【{target['name']}】包含：{names}\n请发 /攻略 关卡名 苦难 查看单关攻略")
+        await guide.finish(f"影拓丰碑【{target['name']}】包含：{_numbered(target)}\n请发 /攻略 关卡名 苦难 或 /攻略 {target['name']} 序号 查看单关攻略")
 
     group = target
     is_tower = group["mode"] == "战争回响"
@@ -266,24 +429,34 @@ async def _enemy_table(enemies: list[dict]) -> str:
         items = "".join(f'<li>{escape(e["name"])}<small>Lv{e["level"]}</small></li>' for e in enemies)
         return _box("敌人", f"<ul>{items}</ul>")
     same_def = len({e.get("def") for e in enemies}) == 1
+    poise = all("poise" in e for e in enemies)  # index built before the bonus lines were added
     icons = await asyncio.gather(
         *(wiki._cached_image(wiki_data.enemy_icon_url(e["icon"]), f"{e['icon']}.png") if e.get("icon") else asyncio.sleep(0, "") for e in enemies)
     )
     rows = []
     for e, icon in zip(enemies, icons):
         thumb = f'<img src="{escape(icon)}">' if icon else '<i class="ph"></i>'
-        res = "　".join(f'{label} <b>{value}</b>' for label, value in e.get("res", [])) or '<span class="dim">无</span>'
+        notes = stages.notes_html(e)
         rows.append(
-            f'<tr><td class="ei">{thumb}</td><td class="fe">{escape(e["name"])}{" *" if e.get("plain") else ""}</td><td class="lv">Lv{e["level"]}</td><td class="num">{e.get("hp", 0):,}</td>'
-            f'<td class="num">{e.get("atk", 0):,}</td>' + ("" if same_def else f'<td class="num">{e.get("def", 0):,}</td>') + f'<td class="rs">{res}</td></tr>'
+            f'<tr><td class="ei"{" rowspan=2" if notes else ""}>{thumb}</td><td class="fe">{escape(e["name"])}{" *" if e.get("plain") else ""}</td>'
+            f'<td class="lv">Lv{e["level"]}</td><td class="num">{e.get("hp", 0):,}</td>'
+            f'<td class="num">{e.get("atk", 0):,}</td>' + ("" if same_def else f'<td class="num">{e.get("def", 0):,}</td>')
+            + (f'<td class="num">{e["poise"]:,}</td>' if poise else "")
+            + f'<td class="rs">{stages.res_html(e)}</td></tr>'
+            + (f'<tr class="bn"><td colspan="{(4 if same_def else 5) + poise + 1}">{notes}</td></tr>' if notes else "")
         )
-    head = "<th></th><th>敌人</th><th>等级</th><th class=\"num\">生命值</th><th class=\"num\">攻击力</th>" + ("" if same_def else "<th class=\"num\">防御力</th>") + "<th>抗性</th>"
+    head = (
+        "<th></th><th>敌人</th><th>等级</th><th class=\"num\">生命值</th><th class=\"num\">攻击力</th>"
+        + ("" if same_def else "<th class=\"num\">防御力</th>")
+        + ("<th class=\"num\">失衡值上限</th>" if poise else "")
+        + "<th>抗性</th>"
+    )
     note = f"防御力均为 {enemies[0].get('def', 0)}；" if same_def else ""
     plain = "；带 * 的敌人不在关卡的固定刷怪配置中（多为战斗中召唤），按其自身属性显示" if any(e.get("plain") for e in enemies) else ""
     return _box(
         "敌人数值",
         f'<table class="foe"><tr>{head}</tr>{"".join(rows)}</table>'
-        f'<div class="note">{note}数值为敌人在本关卡内的属性，已计入关卡对生命值、攻击力的加成和对抗性的调整，未计入上方的特殊增益；抗性越高，受到该类伤害越少{plain}</div>',
+        f'<div class="note">{note}数值为敌人在本关卡内的最终属性，已包含每行下方列出的出生加成（该敌人自带）和关卡加成，未计入上方的特殊增益；抗性越高，受到该类伤害越少{plain}</div>',
         f"{len(enemies)} 种",
     )
 
@@ -359,7 +532,8 @@ async def _render(endgame, group, stage, difficulty, clears, target_text, videos
         elif seen := _last_seen(endgame, group["id"]):
             status = f'<span class="past">上次出现：{escape(seen)}</span>'
     else:
-        status = f'<span class="past">系列：{escape(group["series"])}</span>'
+        number = f" · 第{group['no']}关" if group.get("no") else ""
+        status = f'<span class="past">系列：{escape(group["series"])}{number}</span>'
 
     enemy_block = await _enemy_table(stage["enemies"])
     extra = ""
@@ -412,7 +586,7 @@ async def _render(endgame, group, stage, difficulty, clears, target_text, videos
         f'{escape(difficulty)} · 推荐等级 {stage["recommend_lv"]}',
     )
     return (
-        f'<!doctype html><html><head><meta charset="utf-8"><style>{ef_theme.css()}{GUIDE_CSS % WIDTH}</style></head><body class="ef">'
+        f'<!doctype html><html><head><meta charset="utf-8"><style>{ef_theme.css()}{GUIDE_CSS % WIDTH}{stages.NOTES_CSS}</style></head><body class="ef">'
         + ef_theme.head(f'Arknights: Endfield · {escape(group["mode"])}', escape(group["name"]), f"{tabs}{status}")
         + f"{mechanics}{enemy_block}{extra}{team_block}{video_block}"
         + ef_theme.foot(f'关卡数据 AKEData · 阵容 森空岛战绩 · 视频 哔哩哔哩<br>数据版本 <span class="ef-num">{escape(index.get("version", ""))}</span>')
@@ -499,7 +673,8 @@ async def _board_page(title: str, subtitle: str, body: str, foot: str = BOARD_FO
 async def _speed_card(data, pool, names, group, difficulty, requester, limit) -> str:
     operators = wiki._resolver()[0]["operators"]
     ranking = speed_ranking(data, pool, f"{group['name']}|{difficulty}")
-    header = f'<h3>{escape(group["name"])} · {difficulty}<small class="cjk">{len(ranking)} 人有用时记录</small></h3>'
+    number = f"第{group['no']}关 · " if group.get("no") else ""
+    header = f'<h3>{number}{escape(group["name"])} · {difficulty}<small class="cjk">{len(ranking)} 人有用时记录</small></h3>'
     if not ranking:
         return f'<div class="ef-sec">{header}<div class="ef-empty">本群还没有这关{difficulty}的用时记录</div></div>'
     shown = ranking[:limit]
@@ -538,7 +713,7 @@ def _parse_board_args(arg: Message) -> tuple[str, str | None]:
 def _monument_menu(endgame: dict) -> str:
     lines = ["丰碑竞速 · 请选择要查的丰碑", ""]
     for series in endgame.get("monument", []):
-        lines.append(f"【{series['name']}】" + "、".join(g["name"] for g in series["groups"]))
+        lines.append(f"【{series['name']}】{_numbered(series)}")
         lines.append(f"　→ /丰碑竞速 {series['name']}")
     lines += ["", "只看单关完整榜：/丰碑竞速 关卡名"]
     return "\n".join(lines)
@@ -713,6 +888,22 @@ async def _collect() -> None:
         logger.info(f"War Echoes clears collected in {time.time() - started:.0f}s: {stats}")
     except Exception as e:
         logger.warning(f"War Echoes collection failed: {type(e).__name__}")
+    await _warm_covers()
+
+
+async def _warm_covers() -> None:
+    """Fetch covers that are not cached yet, one at a time (a stage cover is a 20 MB download)."""
+    endgame = _endgame()
+    fetched = 0
+    for url, name, width in _cover_jobs(endgame.get("monument", []), _stage_groups(endgame)):
+        if task := covers.start(url, name, width):
+            try:
+                await task
+                fetched += 1
+            except Exception as e:
+                logger.warning(f"Stage cover unavailable: {type(e).__name__}")
+    if fetched:
+        logger.info(f"Stage covers fetched: {fetched}")
 
 
 _background: set[asyncio.Task] = set()
@@ -723,13 +914,13 @@ async def _first_collect() -> None:
     """Collect shortly after startup when there is no data yet or it was extracted by older rules.
 
     Existing (older) data keeps serving the boards until the new collection finishes.
+    Otherwise only the stage covers that are still missing are fetched.
     """
-    if echo_store.data_file.exists() and echo_store.load().get("schema") == ECHO_SCHEMA and build_store.current():
-        return
+    current = echo_store.data_file.exists() and echo_store.load().get("schema") == ECHO_SCHEMA and build_store.current()
 
     async def run() -> None:
         await asyncio.sleep(120)
-        await _collect()
+        await (_warm_covers() if current else _collect())  # a collection ends with the cover warm-up itself
 
     task = asyncio.get_running_loop().create_task(run())
     _background.add(task)

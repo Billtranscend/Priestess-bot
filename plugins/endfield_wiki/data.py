@@ -67,7 +67,7 @@ TABLES = (
     "ActivityWeeklyTaskTable",
     "ActivityWeeklyTaskMileStoneTable",
 )
-INDEX_SCHEMA = 13  # bump to force a rebuild when the index layout changes
+INDEX_SCHEMA = 15  # bump to force a rebuild when the index layout changes
 # Enemy resistance attribute ids (AttributeShowConfigTable), in the in-game display order.
 ENEMY_RESISTANCES = ((94, "物理"), (98, "灼热"), (97, "电磁"), (96, "寒冷"), (95, "自然"), (99, "超域"))
 TOWER_DIFFICULTIES = {"1": "普通", "2": "困难", "3": "残酷"}
@@ -424,6 +424,7 @@ def build_endgame(load, text, maps: dict, table_dir: Path) -> dict:
     tower_groups, tower_seasons, tower_buffs = load("SeasonTowerGameGroupTable"), load("SeasonTowerTable"), load("SeasonTowerDungeonTable")
     time_ranges = load("TimeRangeTable")
     attr_ids = {name: int(key) for key, name in maps["ATTR_MAP_EN"].items()}
+    attr_names = {int(key): name for key, name in maps["ATTR_MAP"].items() if str(key).isdigit()}
     formulas = {name: int(key) for key, name in maps["MODIFIER_TYPE_MAP"].items()}
     scene_use = Counter(
         (dungeons[s].get("sceneId"), level)
@@ -521,8 +522,17 @@ def build_endgame(load, text, maps: dict, table_dir: Path) -> dict:
                 born += [b for b in entry.get("bornBuffList") or [] if b.get("buffId") not in {x.get("buffId") for x in born}]
             name, icon = display(shown)
             enemy = enemy_rows.get(variant, {})
-            applied = [effects(b) for b in enemy.get("bornBuffs") or []] + [effects(b.get("buffId", ""), b.get("blackboard")) for b in born]
-            foe = {"name": name, "icon": icon, "level": level, **enemy_stats(enemy, enemy_attrs, level, applied)}
+            own = [effects(b) for b in enemy.get("bornBuffs") or []]
+            placed = [effects(b.get("buffId", ""), b.get("blackboard")) for b in born]
+            foe = {"name": name, "icon": icon, "level": level, **enemy_stats(enemy, enemy_attrs, level, own + placed)}
+            # What the numbers above already contain, worded as on the AKEData site: the enemy
+            # variant's own bonuses ("born") and those the stage's spawner adds ("buff").
+            born_notes = modifier_notes(list(enemy.get("attrModifiers") or []) + [m for mods, _ in own for m in mods], attr_names)
+            buff_notes = modifier_notes([m for mods, _ in placed for m in mods], attr_names) + override_notes(placed, attr_names)
+            if born_notes:
+                foe["born"] = born_notes
+            if buff_notes:
+                foe["buff"] = buff_notes
             if not entries:  # not placed by a spawner (summoned in the fight): the enemy's own values only
                 foe["plain"] = True
             if foe not in foes:
@@ -546,6 +556,7 @@ def build_endgame(load, text, maps: dict, table_dir: Path) -> dict:
             "id": group_id,
             "name": base_name(first),
             "mode": "战争回响",
+            "cover": group.get("icon", ""),
             "stages": [stage(stars[k]["gameId"], TOWER_DIFFICULTIES.get(k, k)) for k in sorted(stars) if stars[k].get("gameId")],
         }
 
@@ -573,7 +584,16 @@ def build_endgame(load, text, maps: dict, table_dir: Path) -> dict:
         groups = []
         for base in [sid for sid in stage_ids if not sid.endswith("_s")]:
             variants = [stage(base, "普通")] + ([stage(base + "_s", "苦难")] if base + "_s" in stage_ids else [])
-            groups.append({"id": base, "name": base_name(base), "mode": "影拓丰碑", "series": text(row.get("name")), "stages": variants})
+            groups.append(
+                {
+                    "id": base,
+                    "name": base_name(base),
+                    "mode": "影拓丰碑",
+                    "series": text(row.get("name")),
+                    "cover": dungeons.get(base, {}).get("dungeonPicPath", ""),
+                    "stages": variants,
+                }
+            )
         monument.append({"id": series_id, "name": text(row.get("name")), "groups": groups})
 
     return {"tower": tower, "tower_seasons": seasons, "monument": monument}
@@ -625,6 +645,9 @@ def buff_effects(buff: dict, blackboard: list | None, attr_ids: dict[str, int], 
 # percentage is x(1 + value) and several of them multiply. The site is the reference these numbers
 # are checked against, so stacking follows it exactly.
 MODIFIER_STEPS = ((5, "add"), (6, "percent"), (7, "add"), (8, "factor"), (3, "add"), (4, "factor"), (0, "add"), (1, "percent"))
+MODIFIER_KINDS = dict(MODIFIER_STEPS)
+LEGACY_RESISTANCES = {80, 81, 82, 83, 84, 85}  # *DmgResistScalar: the site leaves these out of its bonus lines
+BALANCED_RESISTANCES = (94, 95, 96, 97, 98)  # the five elements a stage levels to one value (超域 stays as it is)
 
 
 def hides_health_bar(buff: dict) -> bool:
@@ -649,8 +672,52 @@ def modified(value: float, modifiers: list[dict], attr: int) -> float:
     return value
 
 
+def _number(value: float) -> str:
+    return f"{value:.4f}".rstrip("0").rstrip(".")
+
+
+def modifier_notes(modifiers: list[dict], attr_names: dict[int, str]) -> list[str]:
+    """Attribute modifiers as "最大生命值 +60%" / "失衡值上限 +40", one per attribute and kind.
+
+    Same grouping and wording as the AKEData site: percentages of one attribute compound,
+    factors multiply and are shown as a percentage too, the rest adds up.
+    """
+    merged: dict[tuple[int, int], float] = {}
+    for mod in modifiers:
+        key, amount = (mod.get("attrType"), mod.get("modifierType")), mod.get("attrValue", 0.0)
+        if key[0] in LEGACY_RESISTANCES or key[0] not in attr_names or key[1] not in MODIFIER_KINDS:
+            continue
+        step = MODIFIER_KINDS[key[1]]
+        if key not in merged:
+            merged[key] = amount
+        elif step == "percent":
+            merged[key] = (1 + merged[key]) * (1 + amount) - 1
+        elif step == "factor":
+            merged[key] *= amount
+        else:
+            merged[key] += amount
+    notes = []
+    for (attr, kind), amount in merged.items():
+        step = MODIFIER_KINDS[kind]
+        amount = amount - 1 if step == "factor" else amount
+        shown = f"{_number(amount * 100)}%" if step in ("percent", "factor") else _number(amount)
+        notes.append(f"{attr_names[attr]} {'+' if amount > 0 else ''}{shown}")
+    return notes
+
+
+def override_notes(effects: list[tuple[list[dict], dict[int, float]]], attr_names: dict[int, str]) -> list[str]:
+    """Raw attributes a stage sets outright; levelled elemental resistances become one line."""
+    overrides = {attr: value for _, sets in effects for attr, value in sets.items()}
+    levelled = {overrides.get(attr) for attr in BALANCED_RESISTANCES}
+    notes = []
+    if len(levelled) == 1 and None not in levelled:
+        notes.append(f"属性抗性统一为 {_number(levelled.pop())}")
+        overrides = {attr: value for attr, value in overrides.items() if attr not in BALANCED_RESISTANCES}
+    return notes + [f"{attr_names[attr]} 固定为 {_number(value)}" for attr, value in overrides.items() if attr in attr_names]
+
+
 def enemy_stats(row: dict, templates: dict, level: int, effects: list[tuple[list[dict], dict[int, float]]] | tuple = ()) -> dict:
-    """HP / ATK / DEF and non-zero resistances of an enemy at the stage level.
+    """HP / ATK / DEF / 失衡值上限 and non-zero resistances of an enemy at the stage level.
 
     Counts the enemy's own attrModifiers and the `effects` (see buff_effects) of the buffs it is
     born with in the stage. Stage-wide buffs (special_buff text) are not applied.
@@ -665,9 +732,15 @@ def enemy_stats(row: dict, templates: dict, level: int, effects: list[tuple[list
     for buff_modifiers, overrides in effects:
         modifiers += buff_modifiers
         base.update(overrides)
-    stats = {key: round(modified(base.get(attr, 0.0), modifiers, attr)) for attr, key in ((1, "hp"), (2, "atk"), (3, "def"))}
+    stats = {key: round(modified(base.get(attr, 0.0), modifiers, attr)) for attr, key in ((1, "hp"), (2, "atk"), (3, "def"), (20, "poise"))}
     stats["res"] = [[label, value] for attr, label in ENEMY_RESISTANCES if (value := round(modified(base.get(attr, 0.0), modifiers, attr)))]
     return stats
+
+
+def stage_cover_url(group: dict) -> str:
+    """Cover art of a stage: the scene picture for 影拓丰碑 (a 20 MB PNG), the enemy artwork for 战争回响."""
+    folder = "seasontower" if group.get("mode") == "战争回响" else "dungeon"
+    return f"{IMAGE_BASE}/{folder}/{group['cover']}.png" if group.get("cover") else ""
 
 
 def enemy_icon_url(enemy_id: str) -> str:

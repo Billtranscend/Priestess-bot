@@ -38,10 +38,26 @@ class RecordError(RuntimeError):
 
 
 class EchoStore:
-    def __init__(self, data_file: Path, optout_file: Path) -> None:
+    def __init__(self, data_file: Path, optout_file: Path, layout_file: Path | None = None) -> None:
         self.data_file = data_file
         self.optout_file = optout_file
+        self.layout_file = layout_file or data_file.with_name("layout.json")
         self.lock = asyncio.Lock()
+
+    def layout(self) -> dict:
+        """What Skland shows every player alike: series and stages in the game's order, with their pictures."""
+        try:
+            return json.loads(self.layout_file.read_text("utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+    def save_layout(self, layout: dict) -> None:
+        if not layout.get("monument") or layout == self.layout():
+            return
+        tmp = self.layout_file.with_suffix(".tmp")
+        tmp.write_text(json.dumps(layout, ensure_ascii=False), "utf-8")
+        tmp.chmod(0o600)
+        tmp.replace(self.layout_file)
 
     def load(self) -> dict:
         try:
@@ -114,6 +130,8 @@ class EchoStore:
                             await asyncio.sleep(REQUEST_GAP)
                             monument = await _fetch(INDIE_HARD_URL, user, char)
                             records.update(_extract_monument(monument["indieHard"]))
+                            if not stats["ok"]:  # the same for every member: one answer per run is enough
+                                self.save_layout(extract_layout(echoes["warEchoes"], monument["indieHard"]))
                             data["members"][qq] = {"ts": time.time(), "records": records}
                             data["targets"].update(targets)
                             stats["ok"] += 1
@@ -226,6 +244,36 @@ def _extract_monument(indie_hard: dict) -> dict:
                     if _faster(record, records.get(key)):
                         records[key] = record
     return records
+
+
+def extract_layout(echoes: dict, indie_hard: dict) -> dict:
+    """Series and stage order as the game lists them, plus the cover pictures Skland uses.
+
+    The game tables keep neither the order of 影拓丰碑 stages nor a series cover.
+    """
+
+    def stamp(value) -> int:
+        return int(value) if str(value or "").isdigit() else 0
+
+    monument = [
+        {
+            "name": series.get("name", ""),
+            "pic": series.get("pic", ""),
+            "stages": [
+                (group.get("normalDungeon") or group.get("hardDungeon") or {}).get("name", "").split("·")[0].strip()
+                for group in series.get("dungeonGroups", [])
+            ],
+            "activity": series.get("activityName", ""),
+            "open": stamp(series.get("activityStartTs")),
+            "close": stamp(series.get("activityEndTs")),
+        }
+        for series in indie_hard.get("indieHardGroups", [])
+    ]
+    seasons = {
+        str(season.get("id")): {"name": season.get("name", ""), "kv": season.get("kvImage", ""), "header": season.get("headerImage", "")}
+        for season in echoes.get("seasons", [])
+    }
+    return {"monument": monument, "seasons": seasons}
 
 
 def speed_ranking(data: dict, group_members: set[str], stage_key: str) -> list[tuple[str, dict]]:
