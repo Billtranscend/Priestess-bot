@@ -589,7 +589,11 @@ async def _render(endgame, group, stage, difficulty, clears, target_text, videos
         f'<!doctype html><html><head><meta charset="utf-8"><style>{ef_theme.css()}{GUIDE_CSS % WIDTH}{stages.NOTES_CSS}</style></head><body class="ef">'
         + ef_theme.head(f'Arknights: Endfield · {escape(group["mode"])}', escape(group["name"]), f"{tabs}{status}")
         + f"{mechanics}{enemy_block}{extra}{team_block}{video_block}"
-        + ef_theme.foot(f'关卡数据 AKEData · 阵容 森空岛战绩 · 视频 哔哩哔哩<br>数据版本 <span class="ef-num">{escape(index.get("version", ""))}</span>')
+        + ef_theme.foot(
+            f'关卡数据 AKEData · 阵容 森空岛战绩 · 视频 哔哩哔哩<br>数据版本 <span class="ef-num">{escape(index.get("version", ""))}</span>',
+            notes=stages.ENEMY_NOTES,
+            title="数值怎么读",
+        )
         + "</body></html>"
     )
 

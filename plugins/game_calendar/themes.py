@@ -79,7 +79,7 @@ body { width: %dpx; padding: 26px; }
         return f'<div class="ef-head"><span class="wm">ENDFIELD</span>{code_html}<div class="k">{kicker}</div><h1>{title}</h1><p>{subtitle}</p></div>'
 
     def foot(self, text: str) -> str:
-        return ef_theme.foot(text)
+        return ef_theme.foot(text, tail=False)
 
     def card(self, title: str, body: str, note: str = "") -> str:
         caption = f"<i>{CAPTIONS[title]}</i>" if title in CAPTIONS else ""

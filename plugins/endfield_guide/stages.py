@@ -384,6 +384,8 @@ def enemies_html(theme, kicker: str, title: str, chips: str, groups: list[dict],
         "".join(sections) + f'<div class="note">{"；".join(notes)}</div>',
         ("多关一起看时只列出最高难度的机制，其他难度发 /敌人 关卡名 · " if brief else "")
         + f"关卡数据 AKEData · 通关阵容和推荐视频见 /攻略 关卡名 · 数据版本 {_version(version)}",
+        ENEMY_NOTES,
+        "数值怎么读",
     )
 
 
@@ -391,11 +393,26 @@ def _version(version: str) -> str:
     return f'<span class="ef-num">{escape(version)}</span>'
 
 
-def _page(theme, head: str, body: str, foot: str) -> str:
+# Plate at the bottom of tall pictures (see ef_theme.foot): how the enemy numbers are put together.
+ENEMY_NOTES = (
+    "<b>关卡内数值 = 基础数值 ×（1 + 出生加成）×（1 + 关卡加成）</b>，固定数值的加成（如 失衡值上限 +40）直接相加",
+    "<b>出生加成</b>是这只敌人自带的；<b>关卡加成</b>是本关卡额外给的，同一只敌人换一关数值就不同",
+    "<b>失衡值上限</b>越高越难打进失衡；<b>抗性</b>越高，受到该属性的伤害越少",
+    "「五种属性」指 物理、灼热、电磁、寒冷、自然；表里的数值已是最终值，不需要再自己乘加成",
+)
+MENU_NOTES = (
+    "<b>/影拓丰碑 丰碑名</b>　该丰碑各关的封面与顺序　　<b>/战争回响</b>　本期轮换",
+    "<b>/敌人 关卡名 [难度]</b>　只看机制和敌人属性，也可写丰碑名或 丰碑名 序号",
+    "<b>/攻略 关卡名 [难度]</b>　完整攻略：机制、敌人、本群通关阵容、推荐视频",
+    "<b>/丰碑竞速</b>　<b>/回响竞速</b>　本群最快通关排名",
+)
+
+
+def _page(theme, head: str, body: str, foot: str, notes: tuple[str, ...] = MENU_NOTES, title: str = "常用指令") -> str:
     return (
         f'<!doctype html><html><head><meta charset="utf-8"><style>{theme.css()}{CSS % WIDTH}</style></head><body class="ef">'
         + head
         + body
-        + theme.foot(foot)
+        + theme.foot(foot, notes=notes, title=title)
         + "</body></html>"
     )

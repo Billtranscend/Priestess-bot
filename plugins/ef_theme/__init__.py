@@ -72,6 +72,18 @@ body.ef { font-family: var(--ef-cjk); color: var(--ef-ink); background-color: va
 .ef-foot .mark { font-family: var(--ef-num); font-weight: 600; letter-spacing: 3px; color: var(--ef-ink); white-space: nowrap; }
 .ef-foot .mark:before { content: ""; display: inline-block; width: 18px; height: 8px; margin-right: 8px; vertical-align: 1px;
   background: repeating-linear-gradient(-45deg, var(--ef-yellow) 0 4px, var(--ef-ink) 4px 8px); }
+.ef-tail { position: relative; margin-top: 16px; min-height: 250px; padding: 22px 26px 24px 34px; overflow: hidden; background: var(--ef-dark); color: #b9b9b2; }
+.ef-tail[hidden] { display: none; }
+.ef-tail:before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 10px; background: var(--ef-yellow); }
+.ef-tail:after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 6px;
+  background: repeating-linear-gradient(-45deg, var(--ef-yellow) 0 12px, var(--ef-dark) 12px 24px); }
+.ef-tail .k { font-family: var(--ef-num); font-weight: 600; font-size: 14px; letter-spacing: 4px; color: var(--ef-yellow); text-transform: uppercase; }
+.ef-tail .t { margin: 4px 0 10px; font-size: 22px; font-weight: 900; color: #f4f4f0; }
+.ef-tail .ln { position: relative; padding-left: 16px; font-size: 15px; line-height: 1.95; }
+.ef-tail .ln:before { content: ""; position: absolute; left: 0; top: 12px; width: 6px; height: 6px; background: var(--ef-yellow); }
+.ef-tail .ln b { font-weight: 700; color: #f4f4f0; }
+.ef-tail .wm { position: absolute; right: 18px; bottom: -26px; font-family: var(--ef-num); font-weight: 700; font-size: 132px; line-height: 1;
+  letter-spacing: 6px; color: rgba(255,255,255,.055); white-space: nowrap; }
 """
 
 
@@ -149,5 +161,28 @@ def head(kicker: str, title: str, subtitle: str = "", code: str = "") -> str:
     return f'<div class="ef-head">{code_html}<div class="k">{kicker}</div><h1>{title}</h1>{sub}</div>'
 
 
-def foot(text: str, mark: str = "PRIESTESS SYSTEM") -> str:
-    return f'<div class="ef-foot"><span>{text}</span><span class="mark">{mark}</span></div>'
+TAIL_RATIO = 1.75  # a page taller than this many widths fills a phone screen in QQ's viewer
+TAIL_NOTES = (
+    "指令必须以 <b>/</b> 开头，全部指令发 <b>/skl帮助</b> 查看",
+    "数据随游戏版本自动更新，仅供参考，请以游戏内为准",
+    "手机上点开长图时，这一块会被「查看原图」等按钮挡住，所以不放重要内容",
+)
+
+
+def foot(text: str, mark: str = "PRIESTESS SYSTEM", notes: tuple[str, ...] | list[str] | None = None, tail: bool = True, title: str = "读图说明") -> str:
+    """Footer line. On tall pages a plate of notes is put above it (`notes`, HTML allowed).
+
+    QQ's mobile viewer lays its 查看原图 / save / forward buttons over the bottom of a picture
+    that fills the screen. The plate takes that spot so the last rows of content stay readable;
+    it is switched on in the page itself, where the final height is known.
+    """
+    line = f'<div class="ef-foot"><span>{text}</span><span class="mark">{mark}</span></div>'
+    if not tail:
+        return line
+    lines = "".join(f'<div class="ln">{note}</div>' for note in (notes or TAIL_NOTES))
+    plate = f'<div class="ef-tail" hidden><div class="k">Notes</div><div class="t">{title}</div>{lines}<span class="wm">ENDFIELD</span></div>'
+    switch = (
+        "<script>(function(){var t=document.querySelector('.ef-tail');"
+        f"if(t&&document.documentElement.scrollHeight>window.innerWidth*{TAIL_RATIO})t.hidden=false;}})();</script>"
+    )
+    return plate + line + switch
