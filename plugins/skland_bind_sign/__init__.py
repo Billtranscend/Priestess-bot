@@ -6,13 +6,23 @@ skland_auto_gacha's hook): when the account did not exist before,
   - both games are signed in the background and one short line is appended to the "绑定成功" reply;
   - the chat it happened in is remembered, and when skland_auto_gacha finishes that account's
     first gacha sync the user is told there (with an @ in groups) how many records were fetched.
-Re-binding, token updates and /skl角色更新 are not first-time bindings and are left alone.
+Re-binding, token updates and /skl角色更新 are not first-time bindings and are left alone, except
+that a re-scan is told about its gacha sync as well.
+
+While that sync is still running, the member's /zmd抽卡记录 and /zmd抽卡记录更新 are answered with
+a short "please wait" instead of being run: the reply to "绑定成功" asks them to hold on, and a
+command sent anyway would only fetch the same records a second time.
 
 It also keeps a binding from being taken over by someone else's scan (the QR code is posted in the
 group, and Skland cannot tell who scanned it):
-  - a member who is already bound and whose login still works gets no QR code at all;
+  - a member who is already bound and whose login still works gets no QR code at all, unless
+    the Hypergryph token behind the gacha queries has expired (the Skland login outlives it; a
+    re-scan with the same account is the only way to renew it, and it keeps every record);
   - a scan may not attach a Skland account that another QQ has already bound;
   - re-scanning after an expired login must be done with the account that was bound before.
+
+And it keeps a scan from being wasted: upstream recalls the QR code between the scan and the
+save, so a recall that fails in the protocol client used to abort the binding.
 """
 
 from __future__ import annotations
@@ -25,8 +35,8 @@ from collections import Counter
 
 from nonebot import get_bots, logger, require
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent, MessageSegment
-from nonebot.exception import IgnoredException
-from nonebot.matcher import Matcher, current_event
+from nonebot.exception import IgnoredException, MockApiException
+from nonebot.matcher import Matcher, current_event, current_matcher
 from nonebot.message import run_preprocessor
 from nonebot.plugin import PluginMetadata
 from nonebot.typing import T_State
@@ -37,14 +47,16 @@ require("nonebot_plugin_skland")
 require("plugins.skland_auto_gacha")
 
 import nonebot_plugin_localstore as store
-from nonebot_plugin_alconna import UniMessage
+from nonebot_plugin_alconna import Text, UniMessage
 from nonebot_plugin_alconna.consts import ALCONNA_RESULT
 from nonebot_plugin_alconna.uniseg.message import current_send_wrapper
 from nonebot_plugin_orm import get_scoped_session, get_session
 from nonebot_plugin_skland import tasks
 from nonebot_plugin_skland.api import SklandAPI
 from nonebot_plugin_skland.commands import bind as binding
+from nonebot_plugin_skland.api import SklandLoginAPI
 from nonebot_plugin_skland.db_handler import get_arknights_characters, get_endfield_characters
+from nonebot_plugin_skland.exception import RequestException
 from nonebot_plugin_skland.model import SkUser
 from nonebot_plugin_skland.schemas import CRED
 from nonebot_plugin_user.models import Bind
@@ -60,6 +72,9 @@ __plugin_meta__ = PluginMetadata(
 )
 
 NOTICE = "\n正在为你签到明日方舟和终末地（仅首次绑定，之后每天自动签到）"
+SYNC_NOTICE = "\n正在自动拉取你的终末地抽卡记录，完成后会在这里通知你；收到通知前请先不要发 /zmd抽卡记录 和 /zmd抽卡记录更新"
+RENEWED = "\n登录凭证已更新，之前保存的抽卡记录都还在"
+SYNC_BUSY = "正在自动拉取你的抽卡记录，完成后机器人会在这里通知你，请收到通知后再查看"
 HEYBOX_HINT = "\n官方接口只提供近期记录，如果你在小黑盒有往期抽卡记录，可发送 /zmd导入小黑盒 小黑盒ID 同步"
 PENDING_FILE = store.get_plugin_data_file("pending.json")
 PENDING_TTL = 3 * 3600  # the queue gives up after ~35 min of retries; anything older is stale
@@ -69,7 +84,7 @@ _tasks: set[asyncio.Task] = set()
 # ── reply line ──────────────────────────────────────────────────────────
 
 
-def _install_notice() -> None:
+def _install_notice(notice: str) -> None:
     """One-shot, current matcher context only; runs after the wrappers installed before it."""
     previous = current_send_wrapper.get(None)
     consumed = False
@@ -83,7 +98,9 @@ def _install_notice() -> None:
             consumed = True
             current_send_wrapper.set(previous)
             message = message.copy()
-            message += NOTICE
+            if SYNC_NOTICE in notice:  # says the same more precisely than the queue's own line
+                message = UniMessage(Text(seg.text.replace(auto_gacha.BIND_NOTICE, "")) if isinstance(seg, Text) else seg for seg in message)
+            message += notice
         return message
 
     current_send_wrapper.set(with_notice)
@@ -140,7 +157,7 @@ def _save_pending(pending: dict[str, dict]) -> None:
     tmp.replace(PENDING_FILE)
 
 
-def _remember_chat(user_id: int) -> None:
+def _remember_chat(user_id: int, first: bool = True) -> None:
     """Note where the binding happened so the sync result can be reported there."""
     event = current_event.get(None)
     if event is None or not hasattr(event, "get_user_id"):
@@ -150,6 +167,7 @@ def _remember_chat(user_id: int) -> None:
         "qq": event.get_user_id(),
         "group_id": event.group_id if isinstance(event, GroupMessageEvent) else None,
         "ts": time.time(),
+        "first": first,
     }
     _save_pending(pending)
 
@@ -170,7 +188,9 @@ async def _on_gacha_synced(user_id: int, status: str, records: int, final: bool)
         return
     pending.pop(str(user_id))
     _save_pending(pending)
-    if status == "success" and records > 0:
+    if status == "success" and not entry.get("first", True):
+        text = f"抽卡记录已重新同步，新增 {records} 条，现在可以发 /zmd抽卡记录 查看"
+    elif status == "success" and records > 0:
         text = f"拉取抽卡数据成功，获得 {records} 条数据"
         text += "" if _rank_opted_out(entry["qq"]) else "，现已加入欧非榜统计名单"
         text += HEYBOX_HINT
@@ -201,6 +221,19 @@ OTHER_ACCOUNT = "扫码的森空岛账号和你原来绑定的不是同一个，
 UNVERIFIED = "暂时无法确认扫码的森空岛账号，绑定没有改动，请稍后再试"
 
 
+async def _gacha_login_expired(user: SkUser) -> bool:
+    """The token the gacha queries need is dead. Anything inconclusive counts as not expired."""
+    if not user.access_token:
+        return False
+    try:
+        await SklandLoginAPI.get_grant_code(user.access_token, 1)
+    except RequestException as e:
+        return "过期" in str(e)
+    except Exception as e:
+        logger.info(f"Skland bind guard: gacha login check inconclusive ({type(e).__name__})")
+    return False
+
+
 async def _login_alive(user: SkUser) -> bool:
     """Whether the stored login still works (renewed if Skland asks). Unknown counts as alive: no QR code is handed out on a guess."""
     try:
@@ -223,8 +256,11 @@ async def _no_qrcode_when_bound(matcher: Matcher, bot: Bot, event: MessageEvent,
         if user is None:
             return
         alive = await _login_alive(user)
+        renewal = alive and await _gacha_login_expired(user)
         await session.commit()  # a renewed token
-    if alive:
+    if renewal:
+        logger.info("Skland bind guard: QR code allowed, the gacha login has expired")
+    elif alive:
         await bot.send(event, MessageSegment.at(event.get_user_id()) + " " + ALREADY_BOUND if isinstance(event, GroupMessageEvent) else ALREADY_BOUND)
         raise IgnoredException("already bound to Skland")
 
@@ -247,6 +283,42 @@ async def _account_problem(user: SkUser, session, first_time: bool) -> str:
     return "" if str(scanned) == str(user.user_id) else OTHER_ACCOUNT
 
 
+# ── no gacha commands while the binding's sync runs ─────────────────────
+
+
+@run_preprocessor
+async def _wait_for_bind_sync(matcher: Matcher, bot: Bot, event: MessageEvent, state: T_State) -> None:
+    arp = getattr(state.get(ALCONNA_RESULT), "result", None)
+    if matcher.plugin_name != "nonebot_plugin_skland" or arp is None or not arp.find("efgacha"):
+        return
+    async with get_session() as session:
+        bind_id = (await session.scalars(select(Bind.bind_id).where(Bind.platform == "QQClient", Bind.platform_id == event.get_user_id()))).first()
+    # Only a sync the member was told to wait for (and will be told the result of).
+    if not bind_id or str(bind_id) not in _load_pending() or not auto_gacha.bind_sync_pending(bind_id):
+        return
+    await bot.send(event, MessageSegment.at(event.get_user_id()) + " " + SYNC_BUSY if isinstance(event, GroupMessageEvent) else SYNC_BUSY)
+    raise IgnoredException("the binding's gacha sync is still running")
+
+
+# ── QR code recall ──────────────────────────────────────────────────────
+
+
+@Bot.on_called_api
+async def _recall_may_fail(bot: Bot, exception: Exception | None, api: str, data: dict, result) -> None:
+    """A failed recall inside a Skland command is logged and treated as done.
+
+    NapCat sometimes times out on recallMsg. The code has been scanned or has expired by then,
+    so leaving the picture in the chat costs nothing, while the exception cost the binding.
+    """
+    if api != "delete_msg" or exception is None:
+        return
+    matcher = current_matcher.get(None)
+    if matcher is None or matcher.plugin_name != "nonebot_plugin_skland":
+        return
+    logger.warning(f"Skland QR code recall failed, the command continues: {type(exception).__name__}")
+    raise MockApiException(None)
+
+
 # ── binding hook ────────────────────────────────────────────────────────
 
 _previous = binding.get_characters_and_bind
@@ -258,19 +330,23 @@ if getattr(_previous, "_bind_sign", False):
 async def _bind_then_sign(user, session):
     state = inspect(user)
     first_time = state.pending or state.transient  # a brand-new row, not a re-bind or token update
+    rescan = not first_time and state.attrs.access_token.history.has_changes()  # /skl角色更新 changes no token
     user_id = user.id
     if problem := await _account_problem(user, session, first_time):
         await session.rollback()  # drops the new row / the credentials the scan put on the existing one
         logger.info(f"Skland bind guard: refused ({'first bind' if first_time else 're-bind'})")
         await UniMessage(problem).finish(at_sender=True)
-    if first_time:
+    if first_time or rescan:
         try:
-            _remember_chat(user_id)  # before the binding queues the sync, so the result cannot be missed
+            _remember_chat(user_id, first_time)  # before the binding queues the sync, so the result cannot be missed
         except Exception as e:
             logger.warning(f"Skland first-bind notice not armed: {type(e).__name__}")
     await _previous(user, session)  # commits the binding (and queues the gacha sync)
+    syncing = SYNC_NOTICE if (first_time or rescan) and auto_gacha.bind_sync_pending(user_id) else ""
+    if rescan:
+        _install_notice(RENEWED + syncing)
     if first_time:
-        _install_notice()
+        _install_notice(NOTICE + syncing)
         task = asyncio.get_running_loop().create_task(_sign_in_background(user_id))
         _tasks.add(task)
         task.add_done_callback(_tasks.discard)

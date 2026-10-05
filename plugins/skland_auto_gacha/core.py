@@ -95,6 +95,12 @@ class Queue:
                 WHERE due<=? ORDER BY CASE reason WHEN 'bind' THEN 0 ELSE 1 END, rowid LIMIT 1""",
                 (time.time(),)).fetchone()
 
+    def waiting(self, user_id: int, reason: str = "bind") -> bool:
+        """A sync of this kind is queued or running for the user and has not failed yet."""
+        with self.connection() as db:
+            return db.execute("SELECT 1 FROM pending WHERE user_id=? AND reason=? AND attempts=0",
+                              (user_id, reason)).fetchone() is not None
+
     def finish(self, item, status: str, records=0, retry=False):
         uid, generation, _, attempts = item
         with self.connection() as db:

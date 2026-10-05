@@ -11,8 +11,9 @@ from pathlib import Path
 from nonebot import get_driver, logger, require
 from nonebot.plugin import PluginMetadata
 from apscheduler.triggers.cron import CronTrigger
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy.orm import Session
 
 require("nonebot_plugin_skland")
 require("nonebot_plugin_apscheduler")
@@ -158,6 +159,39 @@ async def sync_user(uid: int) -> tuple[str, int]:
 # Other local plugins may be told when a queued sync ends:
 #   await listener(user_id, status, new_records, final)   (final=False: a retry is scheduled)
 sync_listeners: list = []
+
+
+def bind_sync_pending(user_id: int) -> bool:
+    """The sync queued by a binding has not had its first attempt finish yet."""
+    return _queue is not None and _queue.waiting(user_id)
+
+
+# ── manual update racing the background sync ────────────────────────────
+# Right after binding, the queue is already fetching the member's records; a member who sends
+# /zmd抽卡记录更新 at that moment fetches the same pulls. Upstream decides what is new when the
+# command starts and saves at its very end, so the later of the two hit the unique key and the
+# command died without a reply. Rows that reached the table in the meantime are dropped from the
+# pending insert instead.
+
+
+@event.listens_for(Session, "before_flush")
+def _skip_saved_records(session, flush_context, instances) -> None:
+    pending: dict[tuple[str, str], list[GachaRecord]] = {}
+    for obj in session.new:
+        if isinstance(obj, GachaRecord):
+            pending.setdefault((obj.char_uid, obj.app_code), []).append(obj)
+    for (char_uid, app_code), records in pending.items():
+        with session.no_autoflush:
+            saved = set(
+                session.execute(
+                    select(GachaRecord.gacha_ts, GachaRecord.pos).where(GachaRecord.char_uid == char_uid, GachaRecord.app_code == app_code)
+                ).all()
+            )
+        duplicates = [r for r in records if (int(r.gacha_ts), int(r.pos)) in saved]
+        for record in duplicates:
+            session.expunge(record)
+        if duplicates:
+            logger.info("auto-efgacha manual_overlap skipped={} kept={}", len(duplicates), len(records) - len(duplicates))
 
 
 async def _tell_listeners(uid: int, status: str, records: int, final: bool) -> None:
