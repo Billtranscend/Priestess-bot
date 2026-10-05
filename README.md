@@ -26,6 +26,7 @@ A QQ group bot for Arknights: Endfield / Arknights communities, built on NoneBot
 - [目录结构](#目录结构)
 - [数据与隐私](#数据与隐私)
 - [常见问题](#常见问题)
+- [反馈](#反馈)
 - [致谢](#致谢)
 - [免责声明](#免责声明)
 - [许可证](#许可证)
@@ -376,6 +377,16 @@ plugins/
 
 **活动、卡池或下期轮换没有显示。** 这些来自 AKEData 的游戏解包数据，版本更新后可能有延迟，
 以游戏内公告为准。
+
+## 反馈
+
+使用中遇到问题，或者有改进的想法，请到 [Issues](https://github.com/Billtranscend/Priestess-bot/issues/new/choose) 选择对应的模板提交：
+
+- **使用问题**：部署不成功、指令没有反应、报错，或者显示的数据不对。
+- **改进建议**：希望增加新功能，或者觉得现有功能可以做得更好。
+
+提交前请把日志和截图里的 Token、Cookie、二维码、QQ 号和群号去掉。上游插件、NapCat、nonebot-bison 自身的问题，
+请到各自的仓库反馈，模板选择页里有对应的链接。
 
 ## 致谢
 

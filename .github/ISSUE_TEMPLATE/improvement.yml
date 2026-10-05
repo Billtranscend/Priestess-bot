@@ -1,0 +1,62 @@
+name: 改进建议
+description: 希望增加新功能，或者觉得现有功能可以做得更好
+title: "[建议] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢提出建议。请尽量说清楚「遇到了什么不方便」，而不只是「想要什么功能」，这样更容易判断怎么做合适。
+
+        提交前请确认内容里没有 Token、Cookie、二维码、QQ 号和群号。
+  - type: dropdown
+    id: area
+    attributes:
+      label: 涉及的功能
+      description: 选最接近的一项
+      options:
+        - 森空岛绑定与签到
+        - 终末地角色卡与练度
+        - 终末地抽卡记录、欧非榜、小黑盒导入
+        - 终末地资料库（干员、武器、套装）
+        - 高难关卡（战争回响、影拓丰碑、攻略、竞速榜）
+        - 活动日历与活动通知
+        - 明日方舟相关功能
+        - 周报、理智提醒等定时消息
+        - 图片样式与清晰度
+        - 部署、配置与文档
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: 现在哪里不方便
+      description: 在什么场景下遇到的，现在是怎么处理的
+      placeholder: 例如：查某个关卡的敌人属性时，必须连同视频和阵容一起出图，图很长。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 希望怎么改
+      description: 期望的指令、回复内容或图片效果；有参考的话可以贴截图或链接
+      placeholder: 例如：增加一个只显示机制和敌人属性的指令。
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 其他可行的做法
+      description: 如果想到过别的方案，或者目前有临时的替代办法，可以写在这里
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 已搜索过现有的 issue，没有重复的建议
+          required: true
+        - label: 内容中不包含 Token、Cookie、二维码、QQ 号或群号
+          required: true

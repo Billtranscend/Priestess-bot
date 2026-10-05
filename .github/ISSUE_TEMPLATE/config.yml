@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 森空岛绑定、签到、角色卡等上游功能的问题
+    url: https://github.com/FrostN0v0/nonebot-plugin-skland/issues
+    about: 这些基础能力来自上游插件 nonebot-plugin-skland。不经过本仓库的修改也能复现的问题，请到上游反馈。
+  - name: QQ 登录、掉线、消息发送失败
+    url: https://github.com/NapNeko/NapCatQQ/issues
+    about: 协议端 NapCat 的问题请到 NapCatQQ 反馈。
+  - name: B 站等动态订阅推送
+    url: https://github.com/MountainDash/nonebot-bison/issues
+    about: 订阅推送由 nonebot-bison 提供，不包含在本仓库中。

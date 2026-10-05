@@ -1,0 +1,85 @@
+name: 使用问题
+description: 部署不成功、指令没有反应、报错，或者显示的数据不对
+title: "[问题] "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提问前请先看一遍 [README 的常见问题](https://github.com/Billtranscend/Priestess-bot#常见问题)。
+
+        日志和截图里常带有敏感信息。提交前请把 Token、Cookie、二维码、QQ 号和群号删掉或打码。
+  - type: dropdown
+    id: kind
+    attributes:
+      label: 问题类型
+      options:
+        - 部署或启动失败
+        - 指令没有反应
+        - 指令报错或回复失败
+        - 显示的数据不对
+        - 图片显示异常或发送很慢
+        - 定时任务或自动通知没有执行
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: 发生了什么
+      description: 实际看到的现象，以及你原本预期的结果
+      placeholder: 例如：发送 /zmd抽卡记录 后机器人只回了表情，没有发图。预期应该收到抽卡记录图片。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 发送了什么指令、在群聊还是私聊、是每次都出现还是偶尔出现
+      placeholder: |
+        1. 在群里发送 /skl绑定 并完成扫码
+        2. 发送 /zmd抽卡记录
+        3. 每次都没有图片
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志
+      description: 出问题前后的 NoneBot 日志（journalctl -u nonebot），只贴相关的几十行即可，记得去掉敏感信息
+      render: text
+    validations:
+      required: false
+  - type: input
+    id: system
+    attributes:
+      label: 系统与架构
+      placeholder: 例如 Ubuntu 24.04，ARM64
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: 版本
+      description: 本仓库的提交（git rev-parse --short HEAD）、Python 版本、NapCat 版本
+      placeholder: 例如 提交 a0cf5aa，Python 3.12，NapCat 4.x
+    validations:
+      required: true
+  - type: textarea
+    id: changes
+    attributes:
+      label: 是否改动过代码或配置
+      description: 如果改过插件、依赖版本或 .env 里的配置，请说明改了什么
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 已阅读 README 的部署说明和常见问题
+          required: true
+        - label: 已搜索过现有的 issue，没有找到相同的问题
+          required: true
+        - label: 内容中不包含 Token、Cookie、二维码、QQ 号或群号
+          required: true
