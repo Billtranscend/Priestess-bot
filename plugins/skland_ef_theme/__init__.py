@@ -10,13 +10,17 @@ files it was derived from; after an upstream update the original template is use
 
 /zmd抽卡记录: see gacha.py. Since 0.7.2 that page is this project's own, handler included.
 
-/skl角色: upstream prints its raw commands ("sk char set ark") on the picture. A reworded copy with
-this bot's command names is generated into the cache at import; if one of the phrases is no longer
-found exactly once, the upstream template is used as it is.
+Small corrections to other upstream pictures (REVISED): a copy of the template with a few phrases
+replaced is generated into the cache at import; if one of the phrases is no longer found exactly
+once, the upstream template is used as it is.
+  /skl角色    upstream prints its raw commands ("sk char set ark"); the copy names this bot's commands.
+  /mrfz卡片   upstream reads the recruitment office without checking that the base has one, so the
+              card of an account without it was never sent.
 """
 import functools
 import hashlib
 import inspect
+import re
 import shutil
 from pathlib import Path
 
@@ -52,8 +56,8 @@ ACTIVE = frozenset(name for name, files in UPSTREAM.items() if _unchanged(files)
 for name in UPSTREAM.keys() - ACTIVE:
     logger.warning(f"Skland Endfield theme disabled for {name}: upstream template changed, re-audit needed")
 
-# template -> (upstream phrase, replacement); the page keeps upstream's look, only the command names change
-REWORDED = {
+# template -> (upstream phrase, replacement); the page keeps upstream's look
+REVISED = {
     "bound_roles.html.jinja2": (
         (">sk char set ark</span> &lt;序号&gt;", ">/skl切换方舟角色</span> 序号"),
         (">sk char set ef</span> &lt;序号&gt;", ">/skl切换终末地角色</span> 序号"),
@@ -62,11 +66,19 @@ REWORDED = {
             '发送 <span class="font-[Bender]">/skl绑定</span> 扫码绑定账号',
         ),
     ),
+    "ark_card.html.jinja2": (  # building.hire is None for a base without the recruitment office
+        (
+            'style="width: {{ (building.hire.refreshCount /  3) * 100 }}%;">',
+            'style="width: {{ (building.hire.refreshCount / 3) * 100 if building.hire else 0 }}%;">',
+        ),
+        ("{{ building.hire.refresh_complete_time }}", "{{ building.hire.refresh_complete_time if building.hire else '未建造' }}"),
+    ),
 }
-REWORDED_DIR = get_plugin_cache_dir() / "templates"
+REVISED_DIR = get_plugin_cache_dir() / "templates"
+_PULLED_IN = re.compile(r"""{%-?\s*(?:include|from|import)\s+['"]([\w.-]+)['"]""")
 
 
-def _reword(name: str, phrases: tuple[tuple[str, str], ...]) -> bool:
+def _revise(name: str, phrases: tuple[tuple[str, str], ...]) -> bool:
     text = (TEMPLATES_DIR / name).read_text(encoding="utf-8")
     if any(text.count(old) != 1 for old, _ in phrases) or text.count("<head>") != 1:
         return False
@@ -74,15 +86,21 @@ def _reword(name: str, phrases: tuple[tuple[str, str], ...]) -> bool:
         text = text.replace(old, new)
     # the copy is rendered from the cache folder: relative paths must keep pointing at the package
     text = text.replace("<head>", f'<head>\n  <base href="{TEMPLATES_DIR.as_uri()}/">')
-    REWORDED_DIR.mkdir(parents=True, exist_ok=True)
-    (REWORDED_DIR / name).write_text(text, encoding="utf-8")
-    shutil.copyfile(TEMPLATES_DIR / "index.css", REWORDED_DIR / "index.css")  # {% include 'index.css' %}
+    REVISED_DIR.mkdir(parents=True, exist_ok=True)
+    (REVISED_DIR / name).write_text(text, encoding="utf-8")
+    pending, copied = _PULLED_IN.findall(text), set()
+    while pending:  # the files it includes or imports are looked up next to it
+        part = pending.pop()
+        if part not in copied and (TEMPLATES_DIR / part).is_file():
+            copied.add(part)
+            shutil.copyfile(TEMPLATES_DIR / part, REVISED_DIR / part)
+            pending += _PULLED_IN.findall((TEMPLATES_DIR / part).read_text(encoding="utf-8"))
     return True
 
 
-REWORDED_ACTIVE = frozenset(name for name, phrases in REWORDED.items() if _reword(name, phrases))
-for name in REWORDED.keys() - REWORDED_ACTIVE:
-    logger.warning(f"Skland picture {name} keeps upstream's raw command names: template changed, re-audit needed")
+REVISED_ACTIVE = frozenset(name for name, phrases in REVISED.items() if _revise(name, phrases))
+for name in REVISED.keys() - REVISED_ACTIVE:
+    logger.warning(f"Skland picture {name} is rendered from upstream's template as it is: it changed, re-audit the corrections")
 
 _previous = render.template_to_pic
 _signature = inspect.signature(_previous)
@@ -96,8 +114,8 @@ async def themed_template_to_pic(*args, **kwargs):
     if bound.arguments.get("template_name") in ACTIVE:
         bound.arguments["template_path"] = str(LOCAL_DIR)
         bound.arguments["templates"] = {**(bound.arguments.get("templates") or {}), "ef_fonts": ef_theme.fonts_css()}
-    elif bound.arguments.get("template_name") in REWORDED_ACTIVE:
-        bound.arguments["template_path"] = str(REWORDED_DIR)
+    elif bound.arguments.get("template_name") in REVISED_ACTIVE:
+        bound.arguments["template_path"] = str(REVISED_DIR)
     return await _previous(*bound.args, **bound.kwargs)
 
 
