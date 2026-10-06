@@ -46,6 +46,11 @@ body { width: %dpx; padding: 26px; }
 .key { font-weight: 700; color: var(--ef-ink); box-shadow: inset 0 -7px 0 var(--ef-yellow); }
 .term { color: var(--ef-ink); text-decoration: underline dotted var(--ef-ink); text-underline-offset: 3px; }
 .info { color: var(--ef-faint); }
+.form { margin-top: 12px; padding: 8px 0 0 12px; border-left: 3px solid var(--ef-yellow); border-top: 1px solid var(--ef-line-2); }
+.desc > .form:first-child { margin-top: 0; }
+.form-h { margin-bottom: 2px; }
+.form-h b { display: inline-block; padding: 0 8px; margin-right: 10px; background: var(--ef-ink); color: var(--ef-yellow); font-size: 14px; line-height: 1.7; }
+.form-h .when { font-size: 13px; color: var(--ef-sub); }
 table { width: 100%%; border-collapse: collapse; }
 td, th { border-top: 1px solid var(--ef-line-2); padding: 6px 16px; font-size: 15px; vertical-align: top; text-align: left; }
 tr:first-child td, tr:first-child th { border-top: 0; }
@@ -263,12 +268,21 @@ def equip_set_html(equip_set: dict, icons: dict[str, str], version: str, usage: 
     return _page(head, body, foot)
 
 
+def _skill_form(form: dict) -> str:
+    """What a skill does in one of the operator's two forms."""
+    when = f'<span class="when">{form["when"]}</span>' if form.get("when") else ""
+    return f'<div class="form"><div class="form-h"><b>{escape(form["name"])}</b>{when}</div>{form["desc"]}</div>'
+
+
 def operator_html(
     op: dict, icon_src: str, version: str, signature_name: str, builds: dict | None = None, min_sample: int = 3, pieces: dict | None = None
 ) -> str:
     stats = "".join(f'<div class="tile"><small>{escape(k)}</small><b class="n">{v}</b></div>' for k, v in op["stats"])
     skills = "".join(
-        _sec(f'{escape(s["name"])}<span class="ef-tag d">{escape(s["type"])}</span>', f'<div class="body desc">{s["desc"]}</div>')
+        _sec(
+            f'{escape(s["name"])}<span class="ef-tag d">{escape(s["type"])}</span>',
+            f'<div class="body desc">{s["desc"]}{"".join(_skill_form(form) for form in s.get("forms", ()))}</div>',
+        )
         for s in op["skills"]
     )
     talents = "".join(

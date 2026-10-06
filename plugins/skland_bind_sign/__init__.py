@@ -9,6 +9,7 @@ role list on every binding; this project keeps the flow its members know and add
                  re-scans with the same account, which renews it and keeps every record.
   /skl添加账号   another Skland account for a member who is already bound: scan -> role list
                  -> reply 「确认」 (upstream's confirmation). `skland qrcode --add` underneath.
+                 A member with nothing bound yet is pointed to /skl绑定 and gets no QR code.
 
 Rules kept from before, because the QR code is posted in the group and Skland cannot tell who
 scanned it:
@@ -238,6 +239,7 @@ if _on_gacha_synced not in auto_gacha.sync_listeners:
 # ── whose account is it ─────────────────────────────────────────────────
 
 ALREADY_BOUND = "你已经绑定过森空岛了，不用再扫码。角色有变化发 /skl角色更新；想再绑定一个森空岛账号发 /skl添加账号；想解绑发 /skl解绑"
+BIND_FIRST = "你还没有绑定过森空岛账号，请先发 /skl绑定 绑定第一个账号；/skl添加账号 是已经绑定之后再加一个账号用的"
 BOUND_ELSEWHERE = "这个森空岛账号已经绑定在另一个 QQ 上，没有为你绑定。二维码只能由发指令的本人用自己的森空岛扫；如果那是你的另一个 QQ，请先在那个 QQ 上发 /skl解绑"
 OTHER_ACCOUNT = "扫码的森空岛账号和你已绑定的不是同一个，绑定没有改动。续期请用原来的账号扫码；想再绑定一个账号请发 /skl添加账号"
 NO_ROLES = "这个森空岛账号下没有可绑定的明日方舟或终末地角色，没有保存"
@@ -288,11 +290,18 @@ def _qrcode_scan() -> bool:
 @run_preprocessor
 async def _no_qrcode_when_bound(matcher: Matcher, bot: Bot, event: MessageEvent, state: T_State) -> None:
     arp = _arp(state)
-    if matcher.plugin_name != "nonebot_plugin_skland" or arp is None or not arp.find("qrcode") or arp.find("qrcode.add"):
-        return  # /skl添加账号 always gets a QR code: the role list has to be confirmed before anything is saved
+    if matcher.plugin_name != "nonebot_plugin_skland" or arp is None or not arp.find("qrcode"):
+        return
+    adding = bool(arp.find("qrcode.add"))
     async with get_session() as session:
         owner_id = await owner_id_of(session, event.get_user_id())
         accounts = list(await session.scalars(select(SkUser).where(SkUser.owner_id == owner_id))) if owner_id is not None else []
+        if adding:
+            if accounts:
+                return  # gets a QR code: the role list has to be confirmed before anything is saved
+            # Nothing bound yet: one command for the first account, another for more, so members do not mix them up.
+            await bot.send(event, MessageSegment.at(event.get_user_id()) + " " + BIND_FIRST if isinstance(event, GroupMessageEvent) else BIND_FIRST)
+            raise IgnoredException("no Skland account bound yet")
         if not accounts:
             return
         renewal = False

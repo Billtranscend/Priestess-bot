@@ -9,8 +9,8 @@
   <meta charset="UTF-8">
   <title>Endfield Card</title>
   {# 本模板由 plugins.skland_ef_theme 从本地目录渲染，文档 URL 指向本地目录；
-     <base> 让 "../images/..." 继续解析到插件包内的 resources/templates（simple_bg 是包内绝对路径） #}
-  <base href="file://{{ simple_bg.rsplit('/images/', 1)[0] }}/templates/">
+     <base> 让 "../images/..." 继续解析到插件包内的 resources/templates（ef_base 由本插件传入） #}
+  <base href="{{ ef_base }}">
   <style>
 /* ef_theme.css() — plugins/ef_theme, inlined (templates are rendered by Jinja) */
 {{ ef_fonts | safe }}

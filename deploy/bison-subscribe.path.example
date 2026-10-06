@@ -1,9 +1,10 @@
-# Starts bison-subscribe.service whenever the bot has queued a newly joined group.
+# Starts bison-subscribe.service whenever the bot has queued a newly joined group or a group it is no longer in.
 [Unit]
-Description=Watch for groups waiting for their default nonebot-bison subscriptions
+Description=Watch for groups waiting to get or lose their nonebot-bison subscriptions
 
 [Path]
 DirectoryNotEmpty=/opt/priestess-bot/data/group_onboarding/requests
+DirectoryNotEmpty=/opt/priestess-bot/data/group_onboarding/removals
 
 [Install]
 WantedBy=multi-user.target

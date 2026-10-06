@@ -67,7 +67,7 @@ TABLES = (
     "ActivityWeeklyTaskTable",
     "ActivityWeeklyTaskMileStoneTable",
 )
-INDEX_SCHEMA = 15  # bump to force a rebuild when the index layout changes
+INDEX_SCHEMA = 16  # bump to force a rebuild when the index layout changes
 # Enemy resistance attribute ids (AttributeShowConfigTable), in the in-game display order.
 ENEMY_RESISTANCES = ((94, "物理"), (98, "灼热"), (97, "电磁"), (96, "寒冷"), (95, "自然"), (99, "超域"))
 TOWER_DIFFICULTIES = {"1": "普通", "2": "困难", "3": "残酷"}
@@ -200,6 +200,11 @@ def fill_placeholders(text: str, values: dict[str, float]) -> str:
     return re.sub(r"\{([^{}]+)\}", replace, text)
 
 
+def strip_live_values(text: str) -> str:
+    """Drop the bracketed parts that show a value of the player's own squad, e.g. 智识值({floor:deck_wisd:0})."""
+    return re.sub(r"[（(][^（）()]*\{floor:[^{}]+\}[^（）()]*[）)]", "", text)
+
+
 def rich_to_html(text: str) -> str:
     """Convert game rich text (<@style>..</>, <#term>..</>, \\n) to safe HTML."""
     out, stack, pos = [], [], 0
@@ -280,7 +285,7 @@ def build_index(table_dir: Path, version: dict, out_file: Path) -> dict[str, int
             if bundle:
                 top = bundle[-1]
                 for entry in top.get("blackboard", []):
-                    values.setdefault(entry["key"].lower(), entry["value"])
+                    values[entry["key"].lower()] = entry["value"]  # a later skill of the group wins, as on the AKEData site
                 values.setdefault("cooldown", top.get("coolDown", 0.0))
                 values.setdefault("costvalue", top.get("costValue", 0.0))
         return values
@@ -307,11 +312,25 @@ def build_index(table_dir: Path, version: dict, out_file: Path) -> dict[str, int
         groups = sorted(grow.get("skillGroupMap", {}).values(), key=lambda g: SKILL_ORDER.index(g.get("skillGroupType", 0)) if g.get("skillGroupType") in SKILL_ORDER else 9)
         for group in groups:
             values = max_level_values(group.get("skillIdList", []))
+            # A skill may read differently in each of two forms of the operator (诀: 阵诀·智 / 阵诀·意);
+            # its common description can then be empty, with everything said in the forms.
+            forms = [
+                {
+                    "name": text(group.get(f"conditionName{n}")),
+                    "when": rich_to_html(strip_live_values(text(group.get(f"conditionDesc{n}"))).removeprefix("/*").removesuffix("*/").strip()),
+                    # a short form text opens with the form's own name again ("阵诀·智：\n- ..."), already the heading here
+                    "desc": rich_to_html(fill_placeholders(
+                        re.sub(r"^<@[^<>]*>%s</>[：:]\n" % re.escape(text(group.get(f"conditionName{n}"))), "", text(group.get(f"conditionPostDesc{n}"))), values)),
+                }
+                for n in (1, 2)
+                if group.get(f"conditionId{n}")
+            ]
             skill_rows.append(
                 {
                     "type": SKILL_TYPES.get(group.get("skillGroupType"), "技能"),
                     "name": text(group.get("name")),
                     "desc": rich_to_html(fill_placeholders(text(group.get("desc")), values)),
+                    "forms": [form for form in forms if form["desc"]],
                     "icon": group.get("icon", ""),
                 }
             )

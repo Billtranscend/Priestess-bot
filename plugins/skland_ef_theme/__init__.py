@@ -5,7 +5,7 @@ site-packages stays untouched.
 /zmd开盒: render.template_to_pic (already wrapped by skland_compact_images) is wrapped once more
 and, for the card template only, `template_path` points at ./templates. The rendered page then
 lives in ./templates, so relative "../images/..." paths would break: the template sets a <base>
-back to the package's templates folder. The override is pinned to the sha256 of the upstream
+back to the package's templates folder (passed in as `ef_base`). The override is pinned to the sha256 of the upstream
 files it was derived from; after an upstream update the original template is used again.
 
 /zmd抽卡记录: see gacha.py. Since 0.7.2 that page is this project's own, handler included.
@@ -113,7 +113,11 @@ async def themed_template_to_pic(*args, **kwargs):
     bound = _signature.bind(*args, **kwargs)
     if bound.arguments.get("template_name") in ACTIVE:
         bound.arguments["template_path"] = str(LOCAL_DIR)
-        bound.arguments["templates"] = {**(bound.arguments.get("templates") or {}), "ef_fonts": ef_theme.fonts_css()}
+        bound.arguments["templates"] = {
+            **(bound.arguments.get("templates") or {}),
+            "ef_fonts": ef_theme.fonts_css(),
+            "ef_base": TEMPLATES_DIR.as_uri() + "/",  # not derived from upstream's variables: 0.7.2 turned simple_bg from a path into a file:// URI
+        }
     elif bound.arguments.get("template_name") in REVISED_ACTIVE:
         bound.arguments["template_path"] = str(REVISED_DIR)
     return await _previous(*bound.args, **bound.kwargs)

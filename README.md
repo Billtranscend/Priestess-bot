@@ -62,7 +62,7 @@ A QQ group bot for Arknights: Endfield / Arknights communities, built on NoneBot
 - 活动日历与活动开启通知（两款游戏）：有活动开启时在各群发一张通知图，不 @全体，夜间开启的在早上统一发
 - 群周报（每周日 19:00）：每周任务、本群竞速前三、关卡轮换、活动与卡池倒计时；机器人是管理员的群会 @全体成员
 - 理智查询，理智回满时在群内提醒
-- 自动同意入群邀请；可选为新群添加 nonebot-bison 的默认订阅，见「部署」
+- 自动同意入群邀请；可选为新群添加 nonebot-bison 的默认订阅，机器人被移出群后自动移除该群的订阅，见「部署」
 
 ### 使用约定
 
@@ -171,7 +171,7 @@ NapCat 以反向 WebSocket 客户端连入。动态推送可另外搭配
 更新代码后建议用 `.venv/bin/python deploy/restart_when_idle.py` 重启：它会等到没有指令正在处理、
 也没有战绩收集在进行时才重启，避免打断群友的操作。该脚本假设服务名为 `nonebot.service` 且当前用户可免密执行 `sudo`。
 
-### 可选：新群自动添加 Bison 订阅
+### 可选：新群自动添加 Bison 订阅，退群后自动移除
 
 `plugins/group_onboarding` 会自动同意入群邀请，并在机器人进群后把群号写入
 `data/group_onboarding/requests/`（一个以群号命名的空文件）。如果同一台机器上还运行着
@@ -187,7 +187,10 @@ NapCat 以反向 WebSocket 客户端连入。动态推送可另外搭配
   示例见 `deploy/bison-subscribe.service.example` 与 `deploy/bison-subscribe.path.example`。
   请求目录对机器人可写，脚本只使用其中纯数字的文件名，不读取文件内容。
 
-不部署这两个单元时，插件仍会同意邀请，只是不会添加订阅。
+机器人被踢出群或主动退群时，插件先用群列表确认已不在该群，再把群号写入 `data/group_onboarding/removals/`，
+同一个脚本会删除该群在 Bison 里的全部订阅（Bison 否则会继续向已经进不去的群推送）；订阅目标本身不动。
+
+不部署这两个单元时，插件仍会同意邀请，只是不会添加或移除订阅。
 
 ## 配置
 
@@ -330,7 +333,7 @@ deploy/
   render_skl_help.py           生成帮助图
   orm_cli.py                   数据库迁移命令行
   restart_when_idle.py         等待没有指令在处理时再重启服务
-  bison_subscribe.py           为新加入的群添加默认的 nonebot-bison 订阅（可选）
+  bison_subscribe.py           为新加入的群添加默认的 nonebot-bison 订阅，移除已退出的群的订阅（可选）
   bison-subscribe.*.example    触发上述脚本的 systemd 单元示例
 plugins/
   ef_theme/                    共享的终末地风格样式与字体
@@ -341,7 +344,7 @@ plugins/
   heybox_import/               从小黑盒导入早期抽卡记录
   weekly_report/               群周报
   game_calendar/               终末地与明日方舟的活动日历、活动开启通知
-  skland_health/               账号体检（只在登录过期时解绑，接口临时报错不处理）与签到网络重试
+  skland_health/               账号体检（只在登录过期时解绑，接口临时报错不处理）；森空岛请求的网络超时重试
   sanity_reminder/             理智查询与提醒
   skl_help/                    帮助图
   skland_ef_theme/             开盒与抽卡记录页面的终末地风格模板，上游图片模板的小修正
@@ -351,6 +354,7 @@ plugins/
   skland_roles.py              取成员默认角色的公共查询
   sqlite_foreign_keys/         为 SQLite 开启外键约束，解绑时角色与抽卡记录随账号一并删除
   skland_shortcuts/            指令别名，上游提示语改写为本机指令名
+  skland_reaction_order/       上游指令的「完成」表情改为在回复发出之后再发送
   skland_efgacha_compat/       上游武器池数据兼容
   skland_resource_resilience/  上游资源下载的超时与重试
   perithacus_guard/            pErithacus 管理指令权限保护
@@ -358,7 +362,7 @@ plugins/
   command_tolerance/           忽略消息开头的文字版「@机器人」
   temp_session_forward/        临时会话 / 私聊触发的合并转发只发给本人
   forward_reply_owner/         群内多页结果的聊天记录卡片标注群名片，并在卡片后 @ 查询人
-  group_onboarding/            自动同意入群邀请，为新群排队添加默认订阅
+  group_onboarding/            自动同意入群邀请，为新群排队添加默认订阅，退群后排队移除
   strict_command.py            指令严格匹配规则
 ```
 

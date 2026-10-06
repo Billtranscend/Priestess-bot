@@ -20,7 +20,10 @@ Everything removed is exported first to backups/skland-health/ (0600).
 /森空岛体检 清理    (superuser) run and remove
 
 The nightly sign-in jobs use httpx's 5 s default timeout and report a timeout as a failed role;
-ark_sign / endfield_sign / refresh_token are wrapped to retry network errors.
+ark_sign / endfield_sign / refresh_token, the binding list / user id queries and the read-only
+queries behind the picture commands (cards, rogue, gacha pages) are wrapped to retry network errors. The login calls (QR code, grant code, cred) do not report network errors
+the way the commands expect: they are retried too and then raised as RequestException, so a
+binding that cannot reach Skland answers "绑定失败" instead of ending silently.
 """
 
 from __future__ import annotations
@@ -407,8 +410,19 @@ async def _(arg: Message = CommandArg()) -> None:
 # ── sign-in network retries ─────────────────────────────────────────────
 
 
+class SklandUnreachable(RequestException):
+    """Reads as plain text where a command puts the error into its reply (NoneBot exceptions print as repr)."""
+
+    def __str__(self) -> str:
+        return str(self.args[0])
+
+
 def _retry_network(bound):
-    """Retry a Skland call when it failed on the network (the plugin reports those as RequestException)."""
+    """Retry a Skland call when it failed on the network (the plugin reports those as RequestException).
+
+    httpx's default timeout is 5 s and a timeout carries no text, so a command used to answer
+    "…失败:" with nothing after the colon. After three tries the member is told what happened.
+    """
 
     @functools.wraps(bound)
     async def wrapper(*args, **kwargs):
@@ -416,15 +430,56 @@ def _retry_network(bound):
             try:
                 return await bound(*args, **kwargs)
             except RequestException as e:
-                if attempt == 2 or not isinstance(e.__cause__ or e.__context__, httpx.HTTPError):
+                cause = e.__cause__ or e.__context__
+                if not isinstance(cause, httpx.HTTPError):
                     raise
+                if attempt == 2:
+                    logger.warning(f"Skland call {bound.__name__} unreachable after 3 tries: {type(cause).__name__}")
+                    raise SklandUnreachable("连接森空岛失败（网络超时或中断），请稍后重试") from cause
                 await asyncio.sleep(2 * (attempt + 1))
 
     wrapper._network_retry = True
     return wrapper
 
 
-for _owner, _name in ((SklandAPI, "ark_sign"), (SklandAPI, "endfield_sign"), (SklandLoginAPI, "refresh_token")):
+for _owner, _name in (
+    (SklandAPI, "ark_sign"), (SklandAPI, "endfield_sign"), (SklandLoginAPI, "refresh_token"),
+    (SklandAPI, "get_binding"), (SklandAPI, "get_user_ID"),  # read during a binding and by the cards
+    # read-only queries behind the picture commands
+    (SklandAPI, "endfield_card"), (SklandAPI, "ark_card"), (SklandAPI, "get_rogue"), (SklandAPI, "endfield_war_echoes"),
+    (SklandAPI, "get_gacha_categories"), (SklandAPI, "get_gacha_history"), (SklandAPI, "get_ef_gacha_history"), (SklandAPI, "get_ef_gacha_content"),
+):
     _method = getattr(_owner, _name)
     if not getattr(_method, "_network_retry", False):
         setattr(_owner, _name, staticmethod(_retry_network(_method)))
+
+
+def _report_network(bound, attempts: int):
+    """Turn a network failure of a login call into the plugin's own RequestException, after retries.
+
+    The login calls let httpx errors through, and the commands only handle RequestException: a
+    connection timeout right after the member scanned the QR code ended the binding with a
+    traceback and no reply at all.
+    """
+
+    @functools.wraps(bound)
+    async def wrapper(*args, **kwargs):
+        for attempt in range(attempts):
+            try:
+                return await bound(*args, **kwargs)
+            except httpx.HTTPError as e:
+                if attempt == attempts - 1:
+                    logger.warning(f"Skland login call {bound.__name__} unreachable after {attempts} tries: {type(e).__name__}")
+                    raise SklandUnreachable("连接森空岛失败（网络超时或中断），请稍后重试") from e
+                await asyncio.sleep(2 * (attempt + 1))
+
+    wrapper._network_reported = True
+    return wrapper
+
+
+# get_scan_status is polled every two seconds by the QR code loop, which treats RequestException as "not scanned yet".
+for _name, _attempts in (("get_scan", 3), ("get_scan_status", 1), ("get_token_by_scan_code", 3), ("get_grant_code", 3),
+                         ("get_cred", 3), ("get_role_token_by_uid", 3), ("get_ak_cookie", 3)):
+    _method = getattr(SklandLoginAPI, _name)
+    if not getattr(_method, "_network_reported", False):
+        setattr(SklandLoginAPI, _name, staticmethod(_report_network(_method, _attempts)))

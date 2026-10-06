@@ -1,6 +1,6 @@
-"""Give newly joined groups the default nonebot-bison subscriptions.
+"""Give newly joined groups the default nonebot-bison subscriptions, and drop those of groups the bot left.
 
-    bison_subscribe.py --db <bison data.db> --requests <dir> --backups <dir>
+    bison_subscribe.py --db <bison data.db> --requests <dir> --backups <dir> [--removals <dir>]
 
 Bison's admin API needs a one-time token that only a superuser can obtain in chat, so a group
 cannot be subscribed through it automatically. The bot (plugins/group_onboarding) therefore drops
@@ -11,8 +11,13 @@ systemd path unit outside the bot's sandbox, adds the rows Bison itself would ad
   - only subscriptions the group does not have yet; existing ones are never changed;
   - after a backup of the database, in one short transaction.
 
+When the bot is kicked from a group or leaves it, the plugin drops the same kind of file into the
+removals directory and every subscription of that group is deleted (Bison would keep trying to
+post there). Targets are left alone even if no group follows them any more: Bison's scheduler
+holds them in memory, and a target nobody subscribes to simply has nobody to post to.
+
 Bison reads a target's subscribers from the database on every dispatch, so no restart is needed.
-The requests directory is writable by the bot and therefore untrusted: only file names made of
+Both directories are writable by the bot and therefore untrusted: only file names made of
 digits are used, nothing is read from the files, and every entry is removed.
 """
 
@@ -112,16 +117,49 @@ def subscribe(db_path: Path, groups: list[int], template=TEMPLATE) -> dict[int, 
     return added
 
 
+def unsubscribe(db_path: Path, groups: list[int]) -> dict[int, list[str]]:
+    """{group id: names of the targets the group no longer follows}. The group's own row stays, as in Bison."""
+    removed: dict[int, list[str]] = {}
+    db = sqlite3.connect(db_path, timeout=30, isolation_level=None)
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        for group in groups:
+            user_target = json.dumps({"platform_type": "QQ Group", "group_id": group})
+            row = db.execute("SELECT id FROM nonebot_bison_user WHERE user_target = ?", (user_target,)).fetchone()
+            removed[group] = []
+            if row is None:
+                continue
+            removed[group] = [
+                f"{name} {LABELS.get(platform, platform)}"
+                for platform, name in db.execute(
+                    "SELECT t.platform_name, t.target_name FROM nonebot_bison_subscribe s JOIN nonebot_bison_target t ON t.id = s.target_id"
+                    " WHERE s.user_id = ? ORDER BY t.id", (row[0],))
+            ]
+            db.execute("DELETE FROM nonebot_bison_subscribe WHERE user_id = ?", (row[0],))
+        db.execute("COMMIT")
+    except BaseException:
+        db.execute("ROLLBACK")
+        raise
+    finally:
+        db.close()
+    return removed
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     for name in ("--db", "--requests", "--backups"):
         parser.add_argument(name, type=Path, required=True)
+    parser.add_argument("--removals", type=Path)
     args = parser.parse_args()
+    gone = take_requests(args.removals) if args.removals else []
     groups = take_requests(args.requests)
-    if not groups:
+    if not gone and not groups:
         return 0
     backup(args.db, args.backups)
-    for group, names in subscribe(args.db, groups).items():
+    # Removals first: a group that was left and joined again in the meantime ends up subscribed.
+    for group, names in (unsubscribe(args.db, gone) if gone else {}).items():
+        print(f"group ...{str(group)[-3:]}: {'unsubscribed from ' + ', '.join(names) if names else 'had no subscriptions, nothing changed'}")
+    for group, names in (subscribe(args.db, groups) if groups else {}).items():
         print(f"group ...{str(group)[-3:]}: {'subscribed to ' + ', '.join(names) if names else 'already subscribed, nothing changed'}")
     return 0
 

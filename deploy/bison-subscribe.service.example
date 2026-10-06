@@ -1,17 +1,19 @@
-# Optional: default nonebot-bison subscriptions for groups the bot joins (see plugins/group_onboarding).
+# Optional: default nonebot-bison subscriptions for groups the bot joins, removed again when it is
+# kicked or leaves (see plugins/group_onboarding).
 # Install the script somewhere the bot cannot write to, e.g.
 #   sudo install -m 755 deploy/bison_subscribe.py /usr/local/lib/priestess-bot/bison_subscribe.py
-# and adjust the three paths. The backups directory must exist before the unit starts.
+# and adjust the four paths. The backups directory must exist before the unit starts; the bot
+# creates the requests and removals directories when it starts.
 [Unit]
-Description=Add the default nonebot-bison subscriptions for groups the QQ bot just joined
+Description=Add the default nonebot-bison subscriptions for groups the QQ bot joined, drop those of groups it left
 
 [Service]
 Type=oneshot
 User=root
-ExecStart=/usr/bin/python3 /usr/local/lib/priestess-bot/bison_subscribe.py --db /opt/bison/data/data.db --requests /opt/priestess-bot/data/group_onboarding/requests --backups /opt/bison/backups/auto-subscribe
+ExecStart=/usr/bin/python3 /usr/local/lib/priestess-bot/bison_subscribe.py --db /opt/bison/data/data.db --requests /opt/priestess-bot/data/group_onboarding/requests --backups /opt/bison/backups/auto-subscribe --removals /opt/priestess-bot/data/group_onboarding/removals
 NoNewPrivileges=true
 PrivateNetwork=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/opt/bison/data /opt/bison/backups/auto-subscribe /opt/priestess-bot/data/group_onboarding/requests
+ReadWritePaths=/opt/bison/data /opt/bison/backups/auto-subscribe /opt/priestess-bot/data/group_onboarding/requests /opt/priestess-bot/data/group_onboarding/removals
