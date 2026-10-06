@@ -1,4 +1,4 @@
-"""Fail-closed compatibility guard for Skland 0.7.1 weapon gacha data."""
+"""Fail-closed compatibility guard for Skland 0.7.2 weapon gacha data."""
 
 from __future__ import annotations
 
@@ -20,17 +20,17 @@ from nonebot_plugin_skland.schemas.endfield.gacha.base import (
 
 __plugin_meta__ = PluginMetadata(
     name="Skland Endfield gacha compatibility guard",
-    description="Filters explicit non-draw weapon-history metadata on Skland 0.7.1.",
+    description="Filters explicit non-draw weapon-history metadata on Skland 0.7.2.",
     usage="Loaded automatically.",
     type="application",
 )
 
-_EXPECTED_VERSION = "0.7.1"
+_EXPECTED_VERSION = "0.7.2"
 _EXPECTED_MODEL_SHA256 = (
     "446f030d030c661e4692fc5fdf20e02d3ad0eb371ca78a575d64f98f6bf7a0a6"
 )
 _EXPECTED_REQUEST_SHA256 = (
-    "a041670ed1bfc245cffc094861ba738e0572e4fed06e1fe82dc16b6a93f1d5fb"
+    "d3b3ea49428d64d9cc7e47ff4ac20abb2687fb9d9efbd26abeb087877251ded7"
 )
 _REQUIRED_WEAPON_FIELDS = frozenset(
     {

@@ -38,21 +38,33 @@ class ShortcutSpec:
     prefix: bool = True
 
 
+ROLE = r"\s+(?:-r|--role)\s*(\d+)"
+
+
+def _query(pattern: str, command: str) -> tuple[ShortcutSpec, ShortcutSpec]:
+    """A query and its `-r 序号` form (another role of the member, see /skl角色); nothing else may follow."""
+    return ShortcutSpec(pattern, command), ShortcutSpec(pattern + ROLE, f"{command} -r {{1}}")
+
+
 CUSTOM_SHORTCUTS = (
     ShortcutSpec(r"(森空岛|skl|skd)绑定", "skland qrcode"),
     ShortcutSpec(r"(森空岛|skl|skd)扫码", "skland qrcode"),
+    ShortcutSpec(r"(森空岛|skl|skd)添加账号", "skland qrcode --add"),
     ShortcutSpec(r"(森空岛|skl|skd)token绑定", "skland bind", fuzzy=True),
     ShortcutSpec(r"(森空岛|skl|skd)解绑", "skland unbind"),
     ShortcutSpec(r"(森空岛|skl|skd)全体角色更新", "skland char update --all"),
     ShortcutSpec(r"(森空岛|skl|skd)角色更新", "skland char update"),
+    ShortcutSpec(r"(森空岛|skl|skd)角色", "skland char"),
+    ShortcutSpec(r"(森空岛|skl|skd)切换(终末地|zmd|ef)角色", "skland char set ef", fuzzy=True),
+    ShortcutSpec(r"(森空岛|skl|skd)切换(明日方舟|方舟|mrfz)角色", "skland char set ark", fuzzy=True),
     ShortcutSpec(r"(终末地|zmd|ef)全体签到详情", "skland efsign status --all"),
     ShortcutSpec(r"(终末地|zmd|ef)全体签到", "skland efsign all"),
-    ShortcutSpec(r"(终末地|zmd|ef)签到详情", "skland efsign status"),
+    *_query(r"(终末地|zmd|ef)签到详情", "skland efsign status"),
     ShortcutSpec(r"(终末地|zmd|ef)签到", "skland efsign sign --all"),
-    ShortcutSpec(r"(终末地|zmd|ef)抽卡记录更新", "skland efgacha -u"),
-    ShortcutSpec(r"(终末地|zmd|ef)抽卡记录", "skland efgacha"),
-    ShortcutSpec(r"(终末地|zmd|ef)卡片", "skland efcard"),
-    ShortcutSpec(r"(终末地|zmd|ef)查询", "skland efcard"),
+    *_query(r"(终末地|zmd|ef)抽卡记录更新", "skland efgacha -u"),
+    *_query(r"(终末地|zmd|ef)抽卡记录", "skland efgacha"),
+    *_query(r"(终末地|zmd|ef)卡片", "skland efcard"),
+    *_query(r"(终末地|zmd|ef)查询", "skland efcard"),
     ShortcutSpec(
         r"(终末地|zmd|ef)开盒 all",
         "skland efcard -a",
@@ -67,12 +79,12 @@ CUSTOM_SHORTCUTS = (
     ),
     ShortcutSpec(r"(明日方舟|方舟|mrfz)全体签到详情", "skland arksign status --all"),
     ShortcutSpec(r"(明日方舟|方舟|mrfz)全体签到", "skland arksign all"),
-    ShortcutSpec(r"(明日方舟|方舟|mrfz)签到详情", "skland arksign status"),
+    *_query(r"(明日方舟|方舟|mrfz)签到详情", "skland arksign status"),
     ShortcutSpec(r"(明日方舟|方舟|mrfz)签到", "skland arksign sign --all"),
-    ShortcutSpec(r"(明日方舟|方舟|mrfz)抽卡记录", "skland gacha"),
-    ShortcutSpec(r"(明日方舟|方舟|mrfz)卡片", "skland"),
-    ShortcutSpec(r"(明日方舟|方舟|mrfz)查询", "skland"),
-    ShortcutSpec(r"(明日方舟|方舟|mrfz)开盒", "skland"),
+    *_query(r"(明日方舟|方舟|mrfz)抽卡记录", "skland gacha"),
+    *_query(r"(明日方舟|方舟|mrfz)卡片", "skland"),
+    *_query(r"(明日方舟|方舟|mrfz)查询", "skland"),
+    *_query(r"(明日方舟|方舟|mrfz)开盒", "skland"),
 )
 
 if any(not spec.prefix for spec in CUSTOM_SHORTCUTS):
@@ -89,6 +101,8 @@ CONFLICTING_BUILTINS = (
     "终末地全体签到详情",
     "终末地抽卡记录",
     r"(ef|zmd)",
+    "战争回响",  # 0.7.2 maps it to its own record card; here /战争回响 is the rotation page of endfield_guide
+    "森空岛角色",
 )
 
 _SHORTCUT_EXTENSION_ID = "builtins.extensions.shortcut:SuperUserShortcutExtension"
@@ -98,6 +112,22 @@ driver = get_driver()
 # Upstream hints name raw option flags that users of the shortcuts never type; say the shortcut instead.
 HINT_REWRITES = {
     "请先使用 -u 参数从接口拉取数据": "请先发送 /zmd抽卡记录更新 拉取数据",
+    "临时选角: 查询、签到、状态及抽卡导入命令可追加 -r <序号>": "临时用别的角色：在指令后加 -r 序号，例如 /zmd开盒 -r 2",
+    "切换默认角色: sk char set ark <序号> / sk char set ef <序号>": "切换默认角色：/skl切换方舟角色 序号、/skl切换终末地角色 序号",
+    "请执行 sk char set ark <序号>": "请发送 /skl切换方舟角色 序号",
+    "请执行 sk char set ef <序号>": "请发送 /skl切换终末地角色 序号",
+    "请以最新 sk char 卡片为准": "请以 /skl角色 的最新卡片为准",
+    "请先执行 sk char update": "请先发送 /skl角色更新",
+    "请通过 sk unbind 移除异常项": "请发送 /skl解绑 移除异常的账号",
+    "请使用 sk bind -u 更新": "请发送 /skl绑定 重新扫码更新",
+    # every member with roles has a default here (skland_health.ensure_defaults), so this means "not bound"
+    "目标用户尚未设置明日方舟默认角色": "对方还没有绑定明日方舟角色",
+    "目标用户尚未设置终末地默认角色": "对方还没有绑定终末地角色",
+    "二维码绑定将由本次命令发起者在角色列表中确认,有效时间约两分钟": "二维码只能由发指令的本人扫码，有效时间约两分钟",
+    # upstream decorates its resource-update replies with emoji (written as escapes: no emoji in this repository)
+    "\u2705 ": "",
+    "\U0001f4e6 ": "",
+    "\u274c ": "",
 }
 
 
@@ -208,4 +238,4 @@ async def _configure_shortcuts() -> None:
         raise RuntimeError(f"Skland shortcut registration incomplete: {len(missing)} missing")
 
     _persist_shortcut_cache()
-    logger.info("Configured %d reviewed Skland shortcuts", len(CUSTOM_SHORTCUTS))
+    logger.info(f"Configured {len(CUSTOM_SHORTCUTS)} reviewed Skland shortcuts")

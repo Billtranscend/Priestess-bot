@@ -1,13 +1,18 @@
 """Weekly Skland binding health check (Monday 04:00 Asia/Shanghai) and sign-in network retries.
 
-For every bound Skland account:
+For every bound Skland account (a member may have several):
   1. verify the login (binding list request; refresh cred_token / re-grant cred when expired);
-     a login that cannot be renewed -> the whole account is unbound;
-  2. re-sync the role list from Skland (roles unbound on Skland's side are dropped);
+     a login that cannot be renewed -> that account is unbound. Any other answer (an error
+     code from a busy API) is not a verdict: the account is left alone until the next run;
+  2. re-sync the role list from Skland with the plugin's own account sync (roles unbound on
+     Skland's side are dropped);
   3. probe every Arknights / Endfield role with the read-only attendance query; a role the API
-     rejects (e.g. 当前用户未经授权) or an Endfield binding without a role is removed;
+     rejects twice in a row (e.g. 当前用户未经授权) is removed;
   4. the account itself stays as long as any role works: it is unbound only when its login is
-     gone or every real role it has was rejected.
+     gone or every real role it has was rejected;
+  5. a member left without a default role for a game they still have roles in gets one again
+     (Skland's own default role if it says so, the oldest role otherwise). The same repair runs
+     at startup.
 Network failures are never treated as invalid: after 3 tries the account is skipped for this run.
 Everything removed is exported first to backups/skland-health/ (0600).
 
@@ -36,7 +41,6 @@ import httpx
 from nonebot import get_bots, get_driver, logger, on_command, require
 from nonebot.adapters import Message
 from nonebot.adapters.onebot.v11 import Bot
-from nonebot.compat import type_validate_python
 from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
 from nonebot.plugin import PluginMetadata
@@ -48,15 +52,15 @@ require("nonebot_plugin_orm")
 require("nonebot_plugin_skland")
 
 from nonebot_plugin_apscheduler import scheduler
-from nonebot_plugin_orm import get_scoped_session
+from nonebot_plugin_orm import get_scoped_session, get_session
 from nonebot_plugin_skland.api import SklandAPI, SklandLoginAPI
 from nonebot_plugin_skland.api.login import skland_app_code
-from nonebot_plugin_skland.db_handler import delete_character_gacha_records, select_user_characters
+from nonebot_plugin_skland.account import sync_account
+from nonebot_plugin_skland.db_handler import get_account_characters
 from nonebot_plugin_skland.exception import RequestException
-from nonebot_plugin_skland.model import Character, GachaRecord, SkUser
+from nonebot_plugin_skland.model import Character, CharacterDefault, GachaRecord, SkUser
 from nonebot_plugin_skland.player_data import ark_card_data
 from nonebot_plugin_skland.schemas import CRED
-from nonebot_plugin_skland.schemas.binding import BindingApp
 from sqlalchemy import delete, select
 
 __plugin_meta__ = PluginMetadata(
@@ -75,7 +79,9 @@ CRED_URL = f"{BASE}/user/auth/generate_cred_by_code"
 GRANT_URL = "https://as.hypergryph.com/user/oauth2/v2/grant"
 CHECKED_APPS = ("arknights", "endfield")
 GAP = 0.6
+RECHECK_GAP = 8  # seconds before a rejected role is asked about a second time
 NO_ROLE = "终末地绑定下没有角色（仅移除这条空记录）"
+EXPIRED = "登录已过期"  # the only account state that unbinds
 ROOT = Path(__file__).resolve().parents[2]
 BACKUP_DIR = ROOT / "backups" / "skland-health"
 AUTO_GACHA_QUEUE = ROOT / "data" / "skland_auto_gacha" / "queue.sqlite3"
@@ -152,7 +158,7 @@ async def _login(user: SkUser) -> tuple[str, list | None]:
         if code in (10000, 10002):
             if await _regrant(user):
                 continue
-            return "登录已过期", None
+            return EXPIRED, None
         break
     return f"接口错误 {code}", None
 
@@ -175,57 +181,60 @@ def _row(obj) -> dict:
     return {column.name: getattr(obj, column.name) for column in obj.__table__.columns}
 
 
-async def _sync_roles(user: SkUser, binding: list, session) -> None:
-    """Same merge as nonebot_plugin_skland.utils.bind_characters, from the binding list already fetched.
-
-    Endfield bindings that have no role yet are not stored: they can never sign in.
-    """
-    apps = type_validate_python(list[BindingApp], binding)
-    bound = {char.uid for app in apps for char in app.bindingList}
-    for character in await select_user_characters(user, session):
-        if character.uid not in bound:
-            await delete_character_gacha_records(character, session)
-            await session.delete(character)
-    for app in apps:
-        for character in app.bindingList:
-            if character.roles:
-                for role in character.roles:
-                    await session.merge(
-                        Character(
-                            id=user.id, uid=character.uid, role_id=role.roleId, nickname=role.nickname, app_code=app.appCode,
-                            channel_master_id=role.serverId, isdefault=len(character.roles) == 1 or role.isDefault,
-                        )
-                    )
-            elif app.appCode != "endfield":
-                await session.merge(
-                    Character(
-                        id=user.id, uid=character.uid, nickname=character.nickName, app_code=app.appCode,
-                        channel_master_id=character.channelMasterId, isdefault=len(app.bindingList) == 1 or character.isDefault,
-                    )
-                )
-    await session.flush()
-
-
 async def _remove_role(char: Character, session, export: dict) -> None:
-    records = (await session.scalars(select(GachaRecord).where(GachaRecord.uid == char.id, GachaRecord.char_uid == char.uid))).all()
+    records = (await session.scalars(select(GachaRecord).where(GachaRecord.character_id == char.id))).all()
     export["skland_gacha_record"] += [_row(r) for r in records]
     export["skland_characters"].append(_row(char))
-    await delete_character_gacha_records(char, session)
-    await session.delete(char)
+    # Explicit deletes: correct whether or not the database enforces ON DELETE CASCADE.
+    await session.execute(delete(GachaRecord).where(GachaRecord.character_id == char.id))
+    await session.execute(delete(CharacterDefault).where(CharacterDefault.character_id == char.id))
+    await session.execute(delete(Character).where(Character.id == char.id))
     await session.flush()
 
 
 async def _remove_user(user: SkUser, session, export: dict) -> None:
-    records = (await session.scalars(select(GachaRecord).where(GachaRecord.uid == user.id))).all()
+    """Unbind one Skland account with its roles and their records."""
+    account_id = user.id
+    role_ids = select(Character.id).where(Character.account_id == account_id)
+    records = (await session.scalars(select(GachaRecord).where(GachaRecord.character_id.in_(role_ids)))).all()
     export["skland_gacha_record"] += [_row(r) for r in records]
-    export["skland_characters"] += [_row(c) for c in await select_user_characters(user, session)]
+    export["skland_characters"] += [_row(c) for c in await get_account_characters(account_id, session)]
     export["skland_user"].append(_row(user))
-    await session.execute(delete(GachaRecord).where(GachaRecord.uid == user.id))
-    await session.execute(delete(Character).where(Character.id == user.id))
-    await session.delete(user)
+    await session.execute(delete(GachaRecord).where(GachaRecord.character_id.in_(role_ids)))
+    await session.execute(delete(CharacterDefault).where(CharacterDefault.character_id.in_(role_ids)))
+    await session.execute(delete(Character).where(Character.account_id == account_id))
+    await session.execute(delete(SkUser).where(SkUser.id == account_id))
     await session.flush()
     with contextlib.suppress(Exception):
-        await ark_card_data.invalidate_user(user.id)
+        await ark_card_data.invalidate_account(account_id)
+
+
+async def ensure_defaults(session, owner_ids: list[int] | None = None) -> int:
+    """Give every member a default role for each game they have roles in; returns how many were set.
+
+    Upstream only picks a default by itself when a game's first role is bound. A default that
+    disappears with its role (removed above, or lost in the 0.7.2 migration when two roles were
+    both marked default) would leave the member's commands asking for `sk char set`.
+    """
+    owners = owner_ids if owner_ids is not None else list(await session.scalars(select(SkUser.owner_id).distinct()))
+    fixed = 0
+    for owner_id in owners:
+        have = set(await session.scalars(select(CharacterDefault.app_code).where(CharacterDefault.owner_id == owner_id)))
+        for app_code in CHECKED_APPS:
+            if app_code in have:
+                continue
+            role_id = await session.scalar(
+                select(Character.id)
+                .join(Character.account)
+                .where(SkUser.owner_id == owner_id, Character.app_code == app_code, Character.role_id != "")
+                .order_by(Character.is_skland_default.desc(), Character.id)
+                .limit(1)
+            )
+            if role_id is not None:
+                session.add(CharacterDefault(owner_id=owner_id, app_code=app_code, character_id=role_id))
+                fixed += 1
+    await session.flush()
+    return fixed
 
 
 def _write_export(export: dict) -> str:
@@ -237,6 +246,7 @@ def _write_export(export: dict) -> str:
 
 
 def _drop_queue(user_ids: list[int]) -> None:
+    """Forget queued gacha syncs of members (owner ids) who have no account left."""
     if not user_ids or not AUTO_GACHA_QUEUE.exists():
         return
     with contextlib.closing(sqlite3.connect(AUTO_GACHA_QUEUE, timeout=15)) as queue, queue:
@@ -251,32 +261,52 @@ async def run(apply: bool) -> dict:
     async with _lock:
         stats, reasons = Counter(), Counter()
         export = {"skland_user": [], "skland_characters": [], "skland_gacha_record": []}
-        removed_users: list[int] = []
+        touched: set[int] = set()  # owners that lost an account or a role
         started = time.time()
         session = get_scoped_session()
         try:
-            for user_id in (await session.scalars(select(SkUser.id))).all():
-                user = await session.get(SkUser, user_id)
+            for account_id in (await session.scalars(select(SkUser.id))).all():
+                user = await session.get(SkUser, account_id)
                 if user is None:
                     continue
+                owner_id = user.owner_id
                 stats["accounts"] += 1
                 try:
-                    state, binding = await _login(user)
-                    if state != "ok":
+                    state, _ = await _login(user)
+                    if state == EXPIRED:
                         stats["invalid_accounts"] += 1
                         reasons[f"账号：{state}"] += 1
                         if apply:
-                            removed_users.append(user.id)
+                            touched.add(owner_id)
                             await _remove_user(user, session, export)
                         await session.commit()
                         continue
+                    if state != "ok":
+                        # Any other answer (an error code, a busy API) says nothing about the login:
+                        # the account and its records stay, the next run looks again.
+                        stats["unclear_accounts"] += 1
+                        reasons[f"账号：{state}（未处理，下次再查）"] += 1
+                        await session.commit()
+                        continue
                     if apply:
-                        await _sync_roles(user, binding, session)
-                    roles = [c for c in await select_user_characters(user, session) if c.app_code in CHECKED_APPS]
+                        await session.commit()  # a renewed token, before the sync opens its own transaction
+                        synced = await sync_account(account_id, session)
+                        if not synced.success:
+                            stats["sync_failed"] += 1
+                            logger.info("Skland health check: role list not refreshed for one account")
+                        user = await session.get(SkUser, account_id)
+                        if user is None:
+                            continue
+                    roles = [c for c in await get_account_characters(account_id, session) if c.app_code in CHECKED_APPS]
                     alive = rejected = 0
                     for char in roles:
                         stats["roles"] += 1
                         role_state = await _role_state(user, char)
+                        if role_state not in ("ok", NO_ROLE):
+                            # Skland sometimes answers a healthy role with a passing error code;
+                            # a role (and its records) is only given up when the answer repeats.
+                            await asyncio.sleep(RECHECK_GAP)
+                            role_state = await _role_state(user, char)
                         if role_state == "ok":
                             alive += 1
                         else:
@@ -284,6 +314,7 @@ async def run(apply: bool) -> dict:
                             stats["invalid_roles"] += 1
                             reasons[f"角色：{role_state}"] += 1
                             if apply:
+                                touched.add(owner_id)
                                 await _remove_role(char, session, export)
                         await asyncio.sleep(GAP)
                     # The account stays while any role works; it goes only when every real role was rejected.
@@ -291,7 +322,7 @@ async def run(apply: bool) -> dict:
                         stats["empty_accounts"] += 1
                         reasons["账号：全部角色都被接口拒绝"] += 1
                         if apply:
-                            removed_users.append(user.id)
+                            touched.add(owner_id)
                             await _remove_user(user, session, export)
                     await session.commit()  # also persists renewed tokens; short transactions keep SQLite unlocked
                 except NetworkError:
@@ -302,12 +333,18 @@ async def run(apply: bool) -> dict:
                     logger.warning(f"Skland health check: account skipped after {type(e).__name__}: {e}")
                     await session.rollback()
                 await asyncio.sleep(GAP)
+            removed_owners: list[int] = []
+            if apply and touched:
+                stats["defaults_set"] = await ensure_defaults(session, sorted(touched))
+                left = set(await session.scalars(select(SkUser.owner_id).where(SkUser.owner_id.in_(touched)).distinct()))
+                removed_owners = sorted(touched - left)
+                await session.commit()
         finally:
             await session.close()
         backup = ""
         if apply and any(export.values()):
             backup = await asyncio.to_thread(_write_export, export)
-            await asyncio.to_thread(_drop_queue, removed_users)
+            await asyncio.to_thread(_drop_queue, removed_owners)
         result = {
             "apply": apply, "seconds": round(time.time() - started), "backup": backup, "reasons": dict(reasons), **dict(stats),
             "removed_gacha_records": len(export["skland_gacha_record"]) if apply else 0,
@@ -325,8 +362,9 @@ def summary(result: dict) -> str:
         f"{verb} {removed_accounts} 个失效账号、{result.get('invalid_roles', 0)} 个失效角色",
     ]
     lines += [f"· {reason} ×{count}" for reason, count in sorted(result["reasons"].items(), key=lambda kv: -kv[1])]
-    if result.get("network_skipped") or result.get("errors"):
-        lines.append(f"因网络或异常跳过 {result.get('network_skipped', 0) + result.get('errors', 0)} 个账号（未改动，下次再查）")
+    skipped = result.get("network_skipped", 0) + result.get("errors", 0) + result.get("unclear_accounts", 0)
+    if skipped:
+        lines.append(f"因网络、接口报错或异常跳过 {skipped} 个账号（未改动，下次再查）")
     if result["apply"] and result["backup"]:
         lines.append(f"删除前已备份：backups/skland-health/{result['backup']}（含 {result['removed_gacha_records']} 条抽卡记录）")
     if not result["apply"] and (removed_accounts or result.get("invalid_roles")):
@@ -343,6 +381,18 @@ async def _weekly() -> None:
     for superuser in get_driver().config.superusers if bot else ():
         with contextlib.suppress(Exception):
             await bot.send_private_msg(user_id=int(superuser), message=summary(result))
+
+
+@get_driver().on_startup
+async def _repair_defaults() -> None:
+    try:
+        async with get_session() as session:
+            fixed = await ensure_defaults(session)
+            await session.commit()
+        if fixed:
+            logger.info(f"Skland health check: default role set for {fixed} member/game pairs that had none")
+    except Exception as e:
+        logger.warning(f"Skland health check: default roles not verified ({type(e).__name__})")
 
 
 @checkup.handle()

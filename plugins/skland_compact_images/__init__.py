@@ -25,7 +25,7 @@ QUALITY = 60
 TALL_HEIGHT = 9000  # px after the 1.5x device scale; taller pages are scaled by TALL_SCALE
 TALL_SCALE = 0.8
 WEBP_MAX_SIDE = 16383  # format limit
-_expected = "6552ed367003eca27b1deaca36197e6945b80c11c9adc88ad75916307435ed00"
+_expected = "71cb72802aa29d8fc6abc9a9de7e0f37d0d3dfa856e6d865a44204c52f0a48d0"  # render.py of 0.7.2
 if hashlib.sha256(Path(render.__file__).read_bytes()).hexdigest() != _expected:
     raise RuntimeError("Skland compact images requires re-audit of renderer")
 _original = render.template_to_pic

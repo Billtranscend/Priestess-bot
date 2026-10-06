@@ -1,4 +1,8 @@
-"""Background Endfield history updates after binding and daily in Asia/Shanghai."""
+"""Background Endfield history updates after binding and daily in Asia/Shanghai.
+
+The queue is keyed by the member (nonebot-plugin-user id, `SkUser.owner_id`). One item syncs
+every Endfield role of every Skland account that member has bound.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -23,10 +27,10 @@ from nonebot_plugin_orm import get_session
 from nonebot_plugin_alconna import UniMessage
 from nonebot_plugin_alconna.uniseg.message import current_send_wrapper
 from nonebot_plugin_skland.api import SklandAPI, SklandLoginAPI
-from nonebot_plugin_skland.commands import bind as binding
 from nonebot_plugin_skland.model import SkUser, Character, GachaRecord
 from nonebot_plugin_skland.schemas import EndfieldPoolType
-from nonebot_plugin_skland.utils import get_all_ef_gacha_records
+from nonebot_plugin_skland.services import binding
+from nonebot_plugin_skland.services.gacha import get_all_ef_gacha_records
 
 from .core import Queue, TZ, record_values
 
@@ -55,7 +59,7 @@ def install_binding_notice():
     async def with_notice(bot, event, message):
         nonlocal consumed
         if (not consumed and isinstance(message, UniMessage)
-                and message.extract_plain_text() in {"绑定成功", "更新成功"}):
+                and message.extract_plain_text() in {"绑定成功", "账号更新成功"}):
             consumed = True
             current_send_wrapper.set(previous)
             message = message.copy()
@@ -66,19 +70,19 @@ def install_binding_notice():
 
     current_send_wrapper.set(with_notice)
 
-# Current installation includes user-approved local Skland changes. Preserve them.
+# The upstream sources this plugin was written against.
 _HASHES = {
-    "commands/bind.py": "3e27cf331aa7363c5dec9cb3e12680d702a9275cef33af6c2477ab1539631bf3",
-    "utils.py": "67e725d5bc9c25ee29934e31bb8ea2f42acb21a238708b4770e890aecb4f3191",
-    "model.py": "bb0ed289b8f4da2f0c6b66a78dc642ab2b265d3ca5963cb55231e276259f40bb",
+    "services/binding.py": "846e7b85cc5aa66105542a8fe87934762db6fb2a5991f48a2f08109684c7cea8",
+    "services/gacha.py": "6e482b41fdf0a9a03aa3c9d6e145854599237f24d444781da2e67732b0477590",
+    "model.py": "eefa679be150f03d5942777bc6105d155110fade7af74f54da05d0c7fb303354",
     "api/login.py": "a777ee74f7574b3184b21ef41496ce856827706fc2536fcd47452aa4f2bbf04b",
-    "api/request.py": "a041670ed1bfc245cffc094861ba738e0572e4fed06e1fe82dc16b6a93f1d5fb",
+    "api/request.py": "d3b3ea49428d64d9cc7e47ff4ac20abb2687fb9d9efbd26abeb087877251ded7",
 }
 
 
 def verify_upstream():
-    if version("nonebot-plugin-skland") != "0.7.1":
-        raise RuntimeError("Skland auto-gacha requires audited version 0.7.1")
+    if version("nonebot-plugin-skland") != "0.7.2":
+        raise RuntimeError("Skland auto-gacha requires audited version 0.7.2")
     root = Path(binding.__file__).parents[1]
     for name, expected in _HASHES.items():
         if hashlib.sha256((root / name).read_bytes()).hexdigest() != expected:
@@ -86,19 +90,19 @@ def verify_upstream():
 
 
 verify_upstream()
-_original_bind = binding.get_characters_and_bind
-if getattr(_original_bind, "_auto_gacha", False):
+_original_commit = binding.commit_account_binding
+if getattr(_original_commit, "_auto_gacha", False):
     raise RuntimeError("Skland auto-gacha binding hook already installed")
 
 
-@functools.wraps(_original_bind)
-async def _bind_then_enqueue(user, session):
-    uid = user.id
-    await _original_bind(user, session)  # Commits binding and characters first.
+@functools.wraps(_original_commit)
+async def _commit_then_enqueue(prepared, session):
+    """Every saved binding (first account, another account, renewed login) queues a sync for its owner."""
+    await _original_commit(prepared, session)  # Commits the account and its roles first.
     if _queue is None:
         raise RuntimeError("Skland auto-gacha queue not initialized")
     try:
-        _queue.enqueue(uid)
+        _queue.enqueue(prepared.owner_id)
     except Exception as exc:
         # Binding already committed; never misreport it as a failed binding.
         logger.error("auto-efgacha enqueue_failed error_type={}", type(exc).__name__)
@@ -107,53 +111,76 @@ async def _bind_then_enqueue(user, session):
         logger.info("auto-efgacha binding_committed queued=1")
 
 
-_bind_then_enqueue._auto_gacha = True
-binding.get_characters_and_bind = _bind_then_enqueue
+_commit_then_enqueue._auto_gacha = True
+binding.commit_account_binding = _commit_then_enqueue
 
 
-async def sync_user(uid: int) -> tuple[str, int]:
+async def sync_user(owner_id: int) -> tuple[str, int]:
+    """Sync every Endfield role of the member: ("success" | "partial" | reason, new rows).
+
+    "partial": some roles were synced and at least one failed. When every role fails, the first
+    error is raised so the queue retries.
+    """
     # Read credentials in a short session; do not hold a transaction during HTTP requests.
     async with get_session() as session:
-        user = await session.get(SkUser, uid)
-        if user is None:
+        accounts = (await session.execute(select(SkUser.id, SkUser.access_token).where(SkUser.owner_id == owner_id))).all()
+        if not accounts:
             return "unbound", 0
-        token = user.access_token
-        if not token:
-            return "no_access_token", 0
-        characters = list(await session.scalars(select(Character).where(
-            Character.id == uid, Character.app_code == "endfield")))
-    if not characters:
+        roles = (await session.execute(
+            select(Character.id, Character.account_id, Character.uid, Character.channel_master_id, Character.role_id)
+            .join(Character.account).where(SkUser.owner_id == owner_id, Character.app_code == "endfield")
+            .order_by(Character.account_id, Character.id))).all()
+    tokens = dict(accounts)
+    # A Skland account can carry a second Endfield binding that has no role in it. The record
+    # API rejects it ("Token is invalid"), which used to fail the member's real role as well.
+    roles = [role for role in roles if role.role_id]
+    if not roles:
         return "no_endfield_character", 0
-    grant = await SklandLoginAPI.get_grant_code(token, 1)
-    total = 0
-    for character in characters:
-        role = await SklandLoginAPI.get_role_token_by_uid(character.uid, grant)
-        records = {}
-        for pool in EndfieldPoolType:
-            fetched = await get_all_ef_gacha_records(character, pool, role, concurrency=1)
-            for record in fetched:
-                values = record_values(uid, character, record)
-                records[(values["gacha_ts"], values["pos"])] = values
-            await asyncio.sleep(0.5)
+    roles = [role for role in roles if tokens.get(role.account_id)]
+    if not roles:
+        return "no_access_token", 0
+    total, synced, errors, grants = 0, 0, [], {}
+    for role in roles:
+        try:
+            token = tokens[role.account_id]
+            if role.account_id not in grants:
+                grants[role.account_id] = await SklandLoginAPI.get_grant_code(token, 1)
+            role_token = await SklandLoginAPI.get_role_token_by_uid(role.uid, grants[role.account_id])
+            records = {}
+            for pool in EndfieldPoolType:
+                for record in await get_all_ef_gacha_records(role.channel_master_id, pool, role_token, concurrency=1):
+                    values = record_values(role.id, record)
+                    records[(values["gacha_ts"], values["pos"])] = values
+                await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            errors.append(exc)
+            logger.warning("auto-efgacha role_failed error_type={}", type(exc).__name__)
+            continue
         async with get_session() as session:
             # Serializes the short save against manual -u/unbind/rebind transactions.
             from sqlalchemy import text
             await session.execute(text("BEGIN IMMEDIATE"))
-            current = await session.get(SkUser, uid)
-            char = await session.get(Character, (uid, character.uid))
-            if current is None or char is None:
+            current = (await session.execute(
+                select(SkUser.owner_id, SkUser.access_token, Character.app_code, Character.role_id, Character.channel_master_id)
+                .join(Character.account).where(Character.id == role.id))).first()
+            if current is None:
                 return "unbound", total
-            if current.access_token != token or char.app_code != "endfield" or (
-                char.role_id, char.channel_master_id
-            ) != (character.role_id, character.channel_master_id):
+            if (current.owner_id, current.access_token, current.app_code, current.role_id, current.channel_master_id) != (
+                owner_id, token, "endfield", role.role_id, role.channel_master_id
+            ):
                 return "binding_changed", total
             for values in records.values():
                 statement = insert(GachaRecord).values(**values).on_conflict_do_nothing(
-                    index_elements=["char_uid", "app_code", "gacha_ts", "pos"])
+                    index_elements=["character_id", "gacha_ts", "pos"])
                 result = await session.execute(statement)
                 total += max(result.rowcount, 0)
             await session.commit()
-    return "success", total
+        synced += 1
+    if not synced:
+        raise errors[0]
+    return ("partial" if errors else "success"), total
 
 
 # Other local plugins may be told when a queued sync ends:
@@ -176,17 +203,13 @@ def bind_sync_pending(user_id: int) -> bool:
 
 @event.listens_for(Session, "before_flush")
 def _skip_saved_records(session, flush_context, instances) -> None:
-    pending: dict[tuple[str, str], list[GachaRecord]] = {}
+    pending: dict[int, list[GachaRecord]] = {}
     for obj in session.new:
-        if isinstance(obj, GachaRecord):
-            pending.setdefault((obj.char_uid, obj.app_code), []).append(obj)
-    for (char_uid, app_code), records in pending.items():
+        if isinstance(obj, GachaRecord) and obj.character_id is not None:
+            pending.setdefault(obj.character_id, []).append(obj)
+    for character_id, records in pending.items():
         with session.no_autoflush:
-            saved = set(
-                session.execute(
-                    select(GachaRecord.gacha_ts, GachaRecord.pos).where(GachaRecord.char_uid == char_uid, GachaRecord.app_code == app_code)
-                ).all()
-            )
+            saved = set(session.execute(select(GachaRecord.gacha_ts, GachaRecord.pos).where(GachaRecord.character_id == character_id)).all())
         duplicates = [r for r in records if (int(r.gacha_ts), int(r.pos)) in saved]
         for record in duplicates:
             session.expunge(record)
@@ -209,7 +232,7 @@ async def queue_daily():
     if not _queue.day_due(now):
         return
     async with get_session() as session:
-        users = list(await session.scalars(select(SkUser.id)))
+        users = list(await session.scalars(select(SkUser.owner_id).distinct()))
     count = _queue.enqueue_day(now, users)
     logger.info("auto-efgacha daily_queued users={}", count)
 
@@ -265,10 +288,10 @@ async def drain_queue():
 async def start_auto_gacha():
     global _queue, _stopping
     verify_upstream()
-    hook = binding.get_characters_and_bind
-    while hook is not _bind_then_enqueue and getattr(hook, "_bind_sign", False):  # skland_bind_sign wraps this hook
+    hook = binding.commit_account_binding
+    while hook is not _commit_then_enqueue and getattr(hook, "_bind_sign", False):  # skland_bind_sign wraps this hook
         hook = hook.__wrapped__
-    if hook is not _bind_then_enqueue:
+    if hook is not _commit_then_enqueue:
         raise RuntimeError("Skland auto-gacha binding hook replaced")
     _queue = Queue(STATE)
     _queue.initialize_day(datetime.now(timezone.utc))

@@ -29,11 +29,11 @@ import nonebot_plugin_skland
 from nonebot_plugin_alconna import UniMessage, message_reaction
 from nonebot_plugin_orm import async_scoped_session
 from nonebot_plugin_skland.api import SklandAPI
-from nonebot_plugin_skland.commands.endfield.utils import check_user_character
+from nonebot_plugin_skland.commands.selection import check_user_character
 from nonebot_plugin_skland.model import Character, SkUser
 from nonebot_plugin_skland.schemas import CRED
 from nonebot_plugin_skland.schemas.endfield.card import BodyEquip, EndfieldCard
-from nonebot_plugin_skland.utils import refresh_access_token_if_needed, refresh_cred_token_if_needed
+from nonebot_plugin_skland.services.auth import refresh_credentials
 from nonebot_plugin_user import UserSession, get_user
 
 __plugin_meta__ = PluginMetadata(
@@ -153,10 +153,11 @@ async def _react(emoji: str) -> None:
         await message_reaction(emoji)
 
 
-@refresh_cred_token_if_needed
-@refresh_access_token_if_needed
+@refresh_credentials
 async def _fetch_card(user: SkUser, char: Character) -> EndfieldCard:
-    return await SklandAPI.endfield_card(CRED(cred=user.cred, token=user.cred_token), user.user_id, char)
+    return await SklandAPI.endfield_card(
+        CRED(cred=user.cred, token=user.cred_token), user_id=user.skland_user_id, role_id=char.role_id, server_id=char.channel_master_id
+    )
 
 
 def _rarity(key: str) -> str:
@@ -311,7 +312,10 @@ def _render(card: EndfieldCard) -> tuple[str, int, int]:
 async def _(event: MessageEvent, user_session: UserSession, session: async_scoped_session) -> None:
     at = next((seg.data.get("qq") for seg in event.message if seg.type == "at" and seg.data.get("qq") != "all"), None)
     target_id = (await get_user(user_session.platform, str(at))).id if at else user_session.user_id
-    user, character = await check_user_character(target_id, session)
+    selected = await check_user_character(target_id, user_session, session, app_code="endfield")  # the member's default role
+    if selected is None:  # not bound, or no default role: the reason has been sent
+        return
+    user, character = selected
 
     await _react(REACTION_PROCESSING)
     try:

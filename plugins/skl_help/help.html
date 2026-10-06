@@ -146,9 +146,13 @@ td.note { color: var(--ef-sub); font-size: 18px; }
     <h3>账号绑定与管理</h3>
     <table>
       <tr><td class="cmd"><code>/skl绑定</code></td><td class="fn">扫二维码绑定（同 <code>/skl扫码</code>）</td><td class="at"><span class="no">否</span></td><td class="note">群聊、私聊均可</td></tr>
+      <tr><td class="cmd"><code>/skl添加账号</code></td><td class="fn">再绑定一个森空岛账号</td><td class="at"><span class="no">否</span></td><td class="note">扫码后核对角色列表，回复「确认」保存</td></tr>
       <tr><td class="cmd"><code>/skltoken绑定 凭据</code></td><td class="fn">用 Token 凭据绑定账号</td><td class="at"><span class="no">否</span></td><td class="note"><span class="red">只能私聊，切勿发到群里</span></td></tr>
       <tr><td class="cmd"><code>/skl角色更新</code></td><td class="fn">刷新已绑定的游戏角色</td><td class="at"><span class="no">否</span></td><td class="note">新绑定或角色有变化时使用</td></tr>
-      <tr><td class="cmd"><code>/skl解绑</code></td><td class="fn">解绑自己的森空岛账号</td><td class="at"><span class="no">否</span></td><td class="note">会删除角色和抽卡记录，需回复「确认」</td></tr>
+      <tr><td class="cmd"><code>/skl角色</code></td><td class="fn">查看已绑定的账号、角色和序号</td><td class="at"><span class="no">否</span></td><td class="note">标有「插件默认」的是指令默认使用的角色</td></tr>
+      <tr><td class="cmd"><code>/skl切换终末地角色 序号</code></td><td class="fn">更换默认使用的角色</td><td class="at"><span class="no">否</span></td><td class="note">方舟用 <code>/skl切换方舟角色 序号</code></td></tr>
+      <tr><td class="cmd"><code>指令 -r 序号</code></td><td class="fn">临时查看另一个角色</td><td class="at"><span class="no">否</span></td><td class="note">如 <code>/zmd抽卡记录 -r 2</code>；榜单和提醒只看默认角色</td></tr>
+      <tr><td class="cmd"><code>/skl解绑</code></td><td class="fn">解绑自己的森空岛账号</td><td class="at"><span class="no">否</span></td><td class="note">按提示选账号序号或「全部」，再回复「确认」；会删除角色和抽卡记录</td></tr>
     </table>
   </div>
 

@@ -114,10 +114,9 @@ class Queue:
                 db.execute("DELETE FROM pending WHERE user_id=? AND generation=?", (uid, generation))
 
 
-def record_values(user_id, character, record):
+def record_values(character_id, record):
     return dict(
-        uid=user_id, char_pk_id=character.id, char_uid=character.uid,
-        app_code="endfield", item_type=record.item_type,
+        character_id=character_id, item_type=record.item_type,
         pool_id=record.poolId, pool_name=record.poolName,
         char_id=record.item_id, char_name=record.item_name,
         rarity=record.rarity, is_new=record.isNew, is_free=record.is_free_pull,

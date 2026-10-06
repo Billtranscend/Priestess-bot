@@ -1,33 +1,37 @@
-"""Endfield-themed copies of nonebot_plugin_skland's /zmd开盒 and /zmd抽卡记录 templates.
+"""Endfield-themed pages for nonebot_plugin_skland's /zmd开盒 and /zmd抽卡记录.
 
-site-packages stays untouched: render.template_to_pic (already wrapped by skland_compact_images)
-is wrapped once more and, for the two Endfield templates only, `template_path` points at
-./templates. The rendered page then lives in ./templates, so relative "../images/..." paths
-would break: the card template sets a <base> back to the package's templates folder, and the
-gacha template uses no relative paths. Each override is pinned to the sha256 of the upstream
+site-packages stays untouched.
+
+/zmd开盒: render.template_to_pic (already wrapped by skland_compact_images) is wrapped once more
+and, for the card template only, `template_path` points at ./templates. The rendered page then
+lives in ./templates, so relative "../images/..." paths would break: the template sets a <base>
+back to the package's templates folder. The override is pinned to the sha256 of the upstream
 files it was derived from; after an upstream update the original template is used again.
 
-The gacha page also gets two things upstream has no data for (see `_gacha_extras`): the gifts the
-game hands out at pull milestones, which are not pulls and must not be read as such, and the date
-the records start at, because the official API drops older pulls.
-"""
+/zmd抽卡记录: see gacha.py. Since 0.7.2 that page is this project's own, handler included.
 
-import contextlib
+/skl角色: upstream prints its raw commands ("sk char set ark") on the picture. A reworded copy with
+this bot's command names is generated into the cache at import; if one of the phrases is no longer
+found exactly once, the upstream template is used as it is.
+"""
 import functools
 import hashlib
 import inspect
-from datetime import datetime, timedelta, timezone
+import shutil
 from pathlib import Path
 
-from nonebot import logger, require
+from nonebot import get_driver, logger, require
 
+require("nonebot_plugin_localstore")
 require("nonebot_plugin_skland")
 require("plugins.skland_compact_images")
 
 from nonebot_plugin_skland import render
 
-from plugins import ef_theme
+from nonebot_plugin_localstore import get_plugin_cache_dir
 from nonebot_plugin_skland.config import TEMPLATES_DIR
+
+from plugins import ef_theme
 
 LOCAL_DIR = Path(__file__).with_name("templates")
 # template -> upstream files it depends on, with the sha256 they had when the local copy was made
@@ -35,12 +39,7 @@ UPSTREAM = {
     "endfield_card.html.jinja2": {
         "endfield_card.html.jinja2": "b2b6958d3280b55fb20a8cf1fa510c54ce7ece3dcce097076d0c1b914a749264",
         "endfield_macros.html.jinja2": "59f8728282438f40573172f4fe776abbfb17d420fff38e52dc5da6555e5194a5",
-        "index.css": "e84e0dadcadc3372892ef8cd413302f5779a67e2ffb8df9b8a45e47f6c25a83b",
-    },
-    "ef_gacha.html.jinja2": {
-        "ef_gacha.html.jinja2": "237dc08954b0f481817af9da24acc456add8ca3c2126132821d5ea55a8759987",
-        "ef_gacha_macros.html.jinja2": "77d7d9a41998c705b742d53929e43e0cde2a368cc79278f3473c1773263c91f7",
-        "index.css": "e84e0dadcadc3372892ef8cd413302f5779a67e2ffb8df9b8a45e47f6c25a83b",
+        "index.css": "13a449248d0208c6a6695369769e7866820b99c64f70d1a7166cdd85dde860d5",  # 0.7.2 (the card template itself is unchanged since 0.7.1)
     },
 }
 
@@ -53,45 +52,37 @@ ACTIVE = frozenset(name for name, files in UPSTREAM.items() if _unchanged(files)
 for name in UPSTREAM.keys() - ACTIVE:
     logger.warning(f"Skland Endfield theme disabled for {name}: upstream template changed, re-audit needed")
 
-CN = timezone(timedelta(hours=8))
+# template -> (upstream phrase, replacement); the page keeps upstream's look, only the command names change
+REWORDED = {
+    "bound_roles.html.jinja2": (
+        (">sk char set ark</span> &lt;序号&gt;", ">/skl切换方舟角色</span> 序号"),
+        (">sk char set ef</span> &lt;序号&gt;", ">/skl切换终末地角色</span> 序号"),
+        (
+            '使用 <span class="font-[Bender]">sk bind</span> 或 <span class="font-[Bender]">sk qrcode</span> 绑定账号',
+            '发送 <span class="font-[Bender]">/skl绑定</span> 扫码绑定账号',
+        ),
+    ),
+}
+REWORDED_DIR = get_plugin_cache_dir() / "templates"
 
 
-def _gift_rules() -> dict:
-    """Pool id -> milestone gifts, from the wiki index (plugins.endfield_wiki.data.build_gacha_gifts)."""
-    with contextlib.suppress(Exception):
-        from plugins import endfield_wiki
+def _reword(name: str, phrases: tuple[tuple[str, str], ...]) -> bool:
+    text = (TEMPLATES_DIR / name).read_text(encoding="utf-8")
+    if any(text.count(old) != 1 for old, _ in phrases) or text.count("<head>") != 1:
+        return False
+    for old, new in phrases:
+        text = text.replace(old, new)
+    # the copy is rendered from the cache folder: relative paths must keep pointing at the package
+    text = text.replace("<head>", f'<head>\n  <base href="{TEMPLATES_DIR.as_uri()}/">')
+    REWORDED_DIR.mkdir(parents=True, exist_ok=True)
+    (REWORDED_DIR / name).write_text(text, encoding="utf-8")
+    shutil.copyfile(TEMPLATES_DIR / "index.css", REWORDED_DIR / "index.css")  # {% include 'index.css' %}
+    return True
 
-        loaded = endfield_wiki._resolver()
-        return ((loaded[0] if loaded else {}).get("calendar") or {}).get("gifts") or {}
-    return {}
 
-
-def _gacha_extras(record) -> dict:
-    """Template values for ef_gacha: gifts per pool, and where the records start.
-
-    ef_gifts: {pool id: {n: [gift]}}: the gifts triggered by the n-th paid pull of that pool.
-    """
-    rules = _gift_rules()
-    gifts: dict[str, dict[int, list]] = {}
-    first, imported = None, 0
-    for pool in record.all_pools:
-        for group in pool.records:
-            first = group.gacha_ts if first is None else min(first, group.gacha_ts)
-            imported += sum(1 for pull in group.pulls if pull.seq_id < 0)  # rows rebuilt by heybox_import
-        paid = pool.paid_pulls
-        for rule in rules.get(pool.pool_id, []):
-            at, n = rule["at"], 0
-            while at <= paid:
-                gifts.setdefault(pool.pool_id, {}).setdefault(at, []).append({**rule["items"][n % len(rule["items"])], "at": at})
-                if not rule["every"]:
-                    break
-                at, n = at + rule["every"], n + 1
-    return {
-        "ef_gifts": gifts,
-        "ef_since": datetime.fromtimestamp(first, CN).strftime("%Y-%m-%d") if first else "",
-        "ef_imported": imported,
-    }
-
+REWORDED_ACTIVE = frozenset(name for name, phrases in REWORDED.items() if _reword(name, phrases))
+for name in REWORDED.keys() - REWORDED_ACTIVE:
+    logger.warning(f"Skland picture {name} keeps upstream's raw command names: template changed, re-audit needed")
 
 _previous = render.template_to_pic
 _signature = inspect.signature(_previous)
@@ -104,15 +95,18 @@ async def themed_template_to_pic(*args, **kwargs):
     bound = _signature.bind(*args, **kwargs)
     if bound.arguments.get("template_name") in ACTIVE:
         bound.arguments["template_path"] = str(LOCAL_DIR)
-        templates = {**(bound.arguments.get("templates") or {}), "ef_fonts": ef_theme.fonts_css()}
-        if bound.arguments["template_name"] == "ef_gacha.html.jinja2":
-            try:
-                templates.update(_gacha_extras(templates["record"]))
-            except Exception as e:  # the page still renders, only without the marks
-                logger.warning(f"Skland Endfield theme: gacha extras unavailable: {type(e).__name__}: {e}")
-        bound.arguments["templates"] = templates
+        bound.arguments["templates"] = {**(bound.arguments.get("templates") or {}), "ef_fonts": ef_theme.fonts_css()}
+    elif bound.arguments.get("template_name") in REWORDED_ACTIVE:
+        bound.arguments["template_path"] = str(REWORDED_DIR)
     return await _previous(*bound.args, **bound.kwargs)
 
 
 themed_template_to_pic._ef_theme = True
 render.template_to_pic = themed_template_to_pic
+
+from . import gacha  # noqa: E402  (installs the gacha page; needs the wrapped renderer above)
+
+
+@get_driver().on_startup
+async def _verify_gacha_page() -> None:
+    gacha.verify()

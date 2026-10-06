@@ -24,6 +24,8 @@ from nonebot_plugin_skland.schemas import CRED
 from nonebot_plugin_user.models import Bind
 from sqlalchemy import select
 
+from plugins.skland_roles import default_role
+
 from .builds import CARD_URL, BuildStore, extract
 
 WAR_ECHOES_URL = "https://zonai.skland.com/api/v1/game/endfield/card/war-echoes"
@@ -109,18 +111,13 @@ class EchoStore:
                     if qq in optout:
                         data["members"].pop(qq, None)
                         continue
-                    user = await session.get(SkUser, bind_id)
-                    if user is None:  # unbound since the last run: no stale clears on the boards
+                    # One entry per member: their default Endfield role (unbound since the last
+                    # run, or no such role: no stale clears on the boards).
+                    selected = await default_role(session, bind_id)
+                    if selected is None:
                         stats["dropped"] += data["members"].pop(qq, None) is not None
                         continue
-                    char = (
-                        await session.scalars(
-                            select(Character).where(Character.id == user.id, Character.isdefault, Character.app_code == "endfield")
-                        )
-                    ).first()
-                    if char is None:
-                        stats["dropped"] += data["members"].pop(qq, None) is not None
-                        continue
+                    user, char = selected
                     # An API error code drops the member at once; other failures (network, login) get one
                     # retry. Members still failing are dropped so stale clears never stay on the boards.
                     for attempt in range(2):
@@ -162,7 +159,7 @@ class EchoStore:
 
 
 async def _fetch(base_url: str, user: SkUser, char: Character) -> dict:
-    url = f"{base_url}?" + urlencode({"roleId": char.role_id, "serverId": char.channel_master_id, "userId": user.user_id})
+    url = f"{base_url}?" + urlencode({"roleId": char.role_id, "serverId": char.channel_master_id, "userId": user.skland_user_id})
 
     async def call() -> dict:
         cred = CRED(cred=user.cred, token=user.cred_token)

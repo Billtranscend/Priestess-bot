@@ -33,8 +33,8 @@ import nonebot_plugin_localstore as store
 from nonebot_plugin_alconna import UniMessage, message_reaction
 from nonebot_plugin_orm import get_session
 from nonebot_plugin_skland.data_source import ef_gacha_pool_data
-from nonebot_plugin_skland.model import GachaRecord
-from nonebot_plugin_skland.utils import group_ef_gacha_records
+from nonebot_plugin_skland.model import CharacterDefault, GachaRecord
+from nonebot_plugin_skland.services.gacha import group_ef_gacha_records
 from nonebot_plugin_user.models import Bind
 from sqlalchemy import select
 
@@ -104,17 +104,18 @@ async def _collect(bot: Bot, group_id: int) -> list[Entry]:
         qq_by_skuser = {b.bind_id: b.platform_id for b in binds}
         if not qq_by_skuser:
             return []
-        records = (
-            await session.scalars(
-                select(GachaRecord).where(
-                    GachaRecord.app_code == "endfield", GachaRecord.uid.in_(qq_by_skuser)
-                )
+        # One entry per member: the records of their default Endfield role.
+        rows = (
+            await session.execute(
+                select(CharacterDefault.owner_id, GachaRecord)
+                .join(GachaRecord, GachaRecord.character_id == CharacterDefault.character_id)
+                .where(CharacterDefault.app_code == "endfield", CharacterDefault.owner_id.in_(qq_by_skuser))
             )
         ).all()
 
     by_user: dict[int, list[GachaRecord]] = {}
-    for record in records:
-        by_user.setdefault(record.uid, []).append(record)
+    for owner_id, record in rows:
+        by_user.setdefault(owner_id, []).append(record)
 
     entries = []
     for uid, user_records in by_user.items():

@@ -1,6 +1,6 @@
 """Retry and share Skland's GitHub resource file-list requests.
 
-Skland 0.7.1 fetches the full recursive GitHub tree (several MB) once per
+Skland (0.7.1 and 0.7.2 alike) fetches the full recursive GitHub tree (several MB) once per
 resource route with httpx's default 5 s timeout and no retry, so startup and
 ``/skland sync`` occasionally fail with ``获取文件列表失败: ReadTimeout``.
 This plugin wraps ``GameResourceDownloader.fetch_file_list`` with a longer
@@ -37,9 +37,9 @@ __plugin_meta__ = PluginMetadata(
     type="application",
 )
 
-_EXPECTED_VERSION = "0.7.1"
+_EXPECTED_VERSION = "0.7.2"
 _EXPECTED_DOWNLOAD_SHA256 = (
-    "8919439dbe6d86881e11d67209ad74fdddf6808378eeae500050f1f23e7f9179"
+    "3b672f9011245a9f39175587ad80a34459cd1f4e8061dbd51859cb17fa8fa4d3"
 )
 _TIMEOUT = Timeout(60.0, connect=15.0)
 _ATTEMPTS = 3

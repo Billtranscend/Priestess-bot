@@ -36,9 +36,10 @@ from nonebot_plugin_apscheduler import scheduler
 from nonebot_plugin_orm import get_session
 from nonebot_plugin_skland.api import SklandAPI, SklandLoginAPI
 from nonebot_plugin_skland.exception import LoginException, RequestException, UnauthorizedException
-from nonebot_plugin_skland.model import Character, SkUser
+from nonebot_plugin_skland.model import SkUser
 from nonebot_plugin_skland.schemas import CRED
-from nonebot_plugin_user.models import Bind
+
+from plugins.skland_roles import default_role, owner_id_of
 from sqlalchemy import select
 
 __plugin_meta__ = PluginMetadata(
@@ -101,31 +102,30 @@ async def _call_with_refresh(user: SkUser, fetch):
     return await fetch(CRED(cred=user.cred, token=user.cred_token))
 
 
-async def _default_char(session, user: SkUser, app_code: str) -> Character | None:
-    return (
-        await session.scalars(
-            select(Character).where(Character.id == user.id, Character.isdefault, Character.app_code == app_code)
-        )
-    ).first()
-
-
-async def _fetch(session, user: SkUser, game: str) -> Sanity | None:
-    char = await _default_char(session, user, game)
-    if char is None:
+async def _fetch(session, owner_id: int, game: str) -> Sanity | None:
+    """Sanity of the member's default role in one game (None: no such role)."""
+    selected = await default_role(session, owner_id, game)
+    if selected is None:
         return None
+    user, char = selected
     if game == "arknights":
         card = await _call_with_refresh(user, lambda cred: SklandAPI.ark_card(cred, str(char.uid)))
         ap = card.status.ap
         return Sanity(ap.ap_now if ap.current < ap.max else ap.current, ap.max, float(ap.completeRecoveryTime))
-    card = await _call_with_refresh(user, lambda cred: SklandAPI.endfield_card(cred, user.user_id, char))
+    card = await _call_with_refresh(
+        user, lambda cred: SklandAPI.endfield_card(cred, user_id=user.skland_user_id, role_id=char.role_id, server_id=char.channel_master_id)
+    )
     dungeon = card.dungeon
     cur, mx = int(dungeon.curStamina or 0), int(dungeon.maxStamina or 0)
     return Sanity(cur, mx, float(dungeon.maxTs) if dungeon.maxTs else time.time())
 
 
-async def _skuser_for_qq(session, qq: str) -> SkUser | None:
-    bind = await session.get(Bind, (PLATFORM, qq))
-    return await session.get(SkUser, bind.bind_id) if bind else None
+async def _member_for_qq(session, qq: str) -> int | None:
+    """The member id of a QQ that has at least one Skland account bound."""
+    owner_id = await owner_id_of(session, qq)
+    if owner_id is None or (await session.scalars(select(SkUser.id).where(SkUser.owner_id == owner_id).limit(1))).first() is None:
+        return None
+    return owner_id
 
 
 def _remaining(seconds: float) -> str:
@@ -142,7 +142,7 @@ async def _react(emoji: str) -> None:
 async def _(event: MessageEvent) -> None:
     lines = []
     async with get_session() as session:
-        user = await _skuser_for_qq(session, str(event.user_id))
+        user = await _member_for_qq(session, str(event.user_id))
         if user is None:
             await sanity.finish("未绑定森空岛账号，请先发送 /skl绑定", at_sender=True)
         for game, label in GAMES.items():
@@ -177,10 +177,10 @@ async def _(event: MessageEvent, arg: Message = CommandArg()) -> None:
         if not isinstance(event, GroupMessageEvent):
             await reminder.finish("请在群里发送 /理智提醒 开，回满时会在该群 @你")
         async with get_session() as session:
-            user = await _skuser_for_qq(session, qq)
+            user = await _member_for_qq(session, qq)
             if user is None:
                 await reminder.finish("未绑定森空岛账号，请先发送 /skl绑定", at_sender=True)
-            games = [g for g in GAMES if await _default_char(session, user, g) is not None]
+            games = [g for g in GAMES if await default_role(session, user, g) is not None]
         if not games:
             await reminder.finish("没有找到已绑定的明日方舟或终末地角色", at_sender=True)
         subs[qq] = {"group": event.group_id, "games": {g: {"full_ts": None, "checked": 0, "notified": False} for g in games}}
@@ -211,8 +211,8 @@ async def _check() -> None:
                     if not (due or now - st["checked"] >= REFRESH_SECONDS):
                         continue
                     try:
-                        user = await _skuser_for_qq(session, qq)
-                        state = await _fetch(session, user, game) if user else None
+                        user = await _member_for_qq(session, qq)
+                        state = await _fetch(session, user, game) if user is not None else None
                     except Exception as e:
                         logger.warning(f"Sanity check failed for one {game} subscriber: {type(e).__name__}")
                         st["checked"] = now

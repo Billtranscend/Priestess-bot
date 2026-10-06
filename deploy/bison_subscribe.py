@@ -27,10 +27,18 @@ import sys
 import time
 from pathlib import Path
 
-# (platform, target id on that platform): 明日方舟 and 明日方舟终末地 on Bilibili
-TEMPLATE = (("bilibili", "161775300"), ("bilibili", "1265652806"))
-CATEGORIES = [1, 2, 3, 4, 6]  # 一般动态, 专栏文章, 视频, 纯文字, 直播推送
-TAGS = ["~互动抽奖"]  # "~" excludes posts with that tag
+POSTS = [1, 2, 3, 4, 6]  # 一般动态, 专栏文章, 视频, 纯文字, 直播推送
+NO_LOTTERY = ["~互动抽奖"]  # "~" excludes posts with that tag
+LIVE_START = [1]  # 开播提醒 only
+# (platform, target id on that platform, categories, tags): 明日方舟 and 明日方舟终末地 on Bilibili,
+# their posts and the start of their live streams
+TEMPLATE = (
+    ("bilibili", "161775300", POSTS, NO_LOTTERY),
+    ("bilibili", "1265652806", POSTS, NO_LOTTERY),
+    ("bilibili-live", "161775300", LIVE_START, []),
+    ("bilibili-live", "1265652806", LIVE_START, []),
+)
+LABELS = {"bilibili": "动态", "bilibili-live": "直播"}
 GROUP_ID = re.compile(r"[1-9][0-9]{4,11}")
 MAX_PER_RUN = 20
 KEEP_BACKUPS = 30
@@ -69,30 +77,30 @@ def backup(db_path: Path, backups: Path) -> None:
         old.unlink()
 
 
-def subscribe(db_path: Path, groups: list[int]) -> dict[int, list[str]]:
+def subscribe(db_path: Path, groups: list[int], template=TEMPLATE) -> dict[int, list[str]]:
     """{group id: names of the targets newly subscribed}."""
     added: dict[int, list[str]] = {}
     db = sqlite3.connect(db_path, timeout=30, isolation_level=None)
     try:
         db.execute("BEGIN IMMEDIATE")
         targets = []
-        for platform, target in TEMPLATE:
+        for platform, target, categories, tags in template:
             row = db.execute("SELECT id, target_name FROM nonebot_bison_target WHERE platform_name = ? AND target = ?", (platform, target)).fetchone()
             if row is None:
                 print(f"template target {platform}/{target} is not followed by Bison; skipped", file=sys.stderr)
             else:
-                targets.append(row)
+                targets.append((row[0], f"{row[1]} {LABELS.get(platform, platform)}", categories, tags))
         for group in groups:
             user_target = json.dumps({"platform_type": "QQ Group", "group_id": group})  # the exact text Bison stores
             row = db.execute("SELECT id FROM nonebot_bison_user WHERE user_target = ?", (user_target,)).fetchone()
             user_id = row[0] if row else db.execute("INSERT INTO nonebot_bison_user (user_target) VALUES (?)", (user_target,)).lastrowid
             added[group] = []
-            for target_id, name in targets:
+            for target_id, name, categories, tags in targets:
                 if db.execute("SELECT 1 FROM nonebot_bison_subscribe WHERE target_id = ? AND user_id = ?", (target_id, user_id)).fetchone():
                     continue
                 db.execute(
                     "INSERT INTO nonebot_bison_subscribe (target_id, user_id, categories, tags) VALUES (?, ?, ?, ?)",
-                    (target_id, user_id, json.dumps(CATEGORIES), json.dumps(TAGS)),
+                    (target_id, user_id, json.dumps(categories), json.dumps(tags)),  # the same text Bison writes
                 )
                 added[group].append(name)
         db.execute("COMMIT")
