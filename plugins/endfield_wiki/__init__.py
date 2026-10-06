@@ -38,7 +38,7 @@ from nonebot_plugin_apscheduler import scheduler
 
 from plugins import ef_theme
 
-from . import data, render
+from . import changes, data, render
 from .lookup import Resolver
 
 __plugin_meta__ = PluginMetadata(
@@ -54,7 +54,8 @@ STATE_FILE = DATA_DIR / "state.json"
 IMAGE_DIR = DATA_DIR / "img"
 ALIASES_FILE = Path(__file__).with_name("aliases.json")
 MISSES_FILE = DATA_DIR / "misses.json"  # unresolved name-like queries (text + count only), for curating aliases
-SYNC_HOURS = 2
+SYNC_MINUTES = 30  # a conditional request; new data usually appears around 06:00-07:00 Beijing on a game update day
+MANIFEST_FAILURES_BEFORE_ALERT = 3  # the data site being unreachable for a while is not worth a message
 NOTIFY_GAP = 3.0
 REACTION_PROCESSING, REACTION_DONE, REACTION_FAIL = "66", "144", "10060"
 
@@ -205,16 +206,27 @@ def _bot() -> Bot | None:
     return next((b for b in get_bots().values() if isinstance(b, Bot)), None)
 
 
-async def _notify_all_groups(version: dict, previous: str) -> None:
+async def _tell_superusers(text: str) -> None:
+    """A private message to every superuser; never to a group."""
+    bot = _bot()
+    if bot is None:
+        logger.warning("Endfield wiki: no bot online, superusers not told")
+        return
+    for user_id in get_driver().config.superusers:
+        try:
+            await bot.send_private_msg(user_id=int(user_id), message=text)
+        except Exception as e:
+            logger.warning(f"Endfield wiki: a superuser could not be told ({type(e).__name__})")
+
+
+async def _notify_all_groups(version: dict, previous: str, new_names: dict[str, list[str]]) -> None:
+    """Sent as soon as the new data is in the index, whatever the hour (the owner's choice: data drops early in the morning)."""
     bot = _bot()
     if bot is None:
         logger.warning("Endfield wiki: no bot online, update notice skipped")
         return
     published = version.get("publishedAt", "")[:10]
-    message = (
-        f"AKEData 终末地解包数据已更新\n{previous} → {version['id']}（{published}）\n"
-        "发送 /干员名 或 /武器名 可查看最新资料，例如 /提丰、/提丰专武"
-    )
+    message = "\n".join([f"AKEData 终末地解包数据已更新\n{previous} → {version['id']}（{published}）", *changes.notice_lines(new_names)])
     groups = await bot.get_group_list()
     for group in groups:
         try:
@@ -241,6 +253,8 @@ async def sync(force: bool = False) -> str:
                 state["etag"] = etag
                 _write_json(STATE_FILE, state)
                 return f"已是最新版本 {previous}"
+            _failures["building"] = latest["id"]  # from here on a failure means a new version could not be taken in
+            old_index = _read_json(INDEX_FILE, {}) if INDEX_FILE.exists() else {}
             table_dir = DATA_DIR / "tables_tmp"
             data.remove_tree(table_dir)
             try:
@@ -248,19 +262,62 @@ async def sync(force: bool = False) -> str:
                 counts = await asyncio.to_thread(data.build_index, table_dir, latest, INDEX_FILE)
             finally:
                 data.remove_tree(table_dir)
-        _write_json(STATE_FILE, {"version": latest["id"], "etag": etag, "synced_at": time.time()})
+        new_index = _read_json(INDEX_FILE, {})
+        found = changes.problems(new_index)
+        unseen = [item for item in found if item not in set(state.get("problems", []))]
+        _write_json(STATE_FILE, {"version": latest["id"], "etag": etag, "synced_at": time.time(), "problems": found})
         logger.info(f"Endfield wiki index built for {latest['id']}: {counts}")
     if previous and previous != latest["id"]:
-        await _notify_all_groups(latest, previous)
+        await _notify_all_groups(latest, previous, changes.added(old_index, new_index))
+    if unseen:
+        logger.warning(f"Endfield wiki: {len(unseen)} new gaps in the cards after building {latest['id']}")
+        await _tell_superusers(
+            f"终末地资料库已更新到 {latest['id']}，但有 {len(unseen)} 处资料卡内容不完整，多半是游戏数据用了新的写法，需要改代码：\n"
+            + "\n".join(f"· {item}" for item in unseen[:15])
+            + (f"\n……共 {len(unseen)} 处" if len(unseen) > 15 else "")
+        )
     return f"已同步 {latest['id']}（干员 {counts['operators']}，武器 {counts['weapons']}）"
 
 
-@scheduler.scheduled_job("interval", hours=SYNC_HOURS, id="endfield_wiki_sync")
+_failures: dict = {"count": 0, "alerted": False, "building": None}
+
+
+async def _sync_failed(error: Exception) -> None:
+    """Tell the superusers once per run of failures: at once when a new version could not be built, later when only the check fails."""
+    _failures["count"] += 1
+    building = _failures["building"]
+    if _failures["alerted"] or (building is None and _failures["count"] < MANIFEST_FAILURES_BEFORE_ALERT):
+        return
+    _failures["alerted"] = True
+    reason = f"{type(error).__name__}: {str(error)[:120]}"
+    current = _read_json(STATE_FILE, {}).get("version", "无")
+    if building:
+        text = (f"终末地资料库更新失败：发现新版本 {building}，但没有重建成功（{reason}）。\n"
+                f"群里查到的仍是旧版本 {current} 的资料，新版本的群通知也还没有发。")
+    else:
+        text = f"终末地资料库已连续 {_failures['count']} 次检查不到 AKEData 的数据版本（{reason}），目前资料停在 {current}。"
+    await _tell_superusers(text + f"\n机器人每 {SYNC_MINUTES} 分钟会自动重试，也可以发 /资料库更新 手动重试；恢复后会再告诉你。")
+
+
+async def _sync_succeeded() -> None:
+    recovered = _failures["alerted"]
+    _failures.update(count=0, alerted=False, building=None)
+    if recovered:
+        await _tell_superusers(f"终末地资料库同步已恢复，当前版本 {_read_json(STATE_FILE, {}).get('version', '未知')}。")
+
+
+@scheduler.scheduled_job("interval", minutes=SYNC_MINUTES, id="endfield_wiki_sync")
 async def _scheduled_sync() -> None:
+    _failures["building"] = None
     try:
         await sync()
     except Exception as e:
         logger.warning(f"Endfield wiki sync failed: {type(e).__name__}: {e}")
+        with contextlib.suppress(Exception):
+            await _sync_failed(e)
+    else:
+        with contextlib.suppress(Exception):
+            await _sync_succeeded()
 
 
 @get_driver().on_startup
