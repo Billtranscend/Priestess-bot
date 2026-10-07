@@ -263,26 +263,3 @@
     </div>
 </div>
 {% endmacro %}
-
-
-{# 卡池分类列渲染 #}
-{% macro ef_pool_column(pools, category_label, category_color, gacha_data=none, visible_pool_ids=none, gifts=none) %}
-{% if visible_pool_ids is not none %}
-{% set filtered_pools = pools | selectattr('pool_id', 'in', visible_pool_ids) | list %}
-{% else %}
-{% set filtered_pools = pools %}
-{% endif %}
-{% if filtered_pools %}
-<div class="col">
-    <div class="ef-sec">
-        {# 分类标题 #}
-        <h3>{{ category_label }}<small>{{ filtered_pools | sum(attribute='paid_pulls') }}<i>抽</i>{% if filtered_pools | sum(attribute='free_pulls') %}<em>另 免费{{ filtered_pools | sum(attribute='free_pulls') }}</em>{% endif %}</small></h3>
-        <div class="pools">
-            {% for pool in filtered_pools %}
-            {{ ef_pool_card(pool, category_label, category_color, gacha_data=gacha_data, gifts=gifts) }}
-            {% endfor %}
-        </div>
-    </div>
-</div>
-{% endif %}
-{% endmacro %}

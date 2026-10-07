@@ -6,9 +6,18 @@ into fixed-height pages in the browser. This project keeps the behaviour its mem
   /zmd抽卡记录        shows what is stored (fast, no request to the game's servers);
   /zmd抽卡记录更新    fetches the official records first, then shows them;
 
-paged by pool count, drawn with the local Endfield template (gifts at pull milestones, free
-ten-pulls, the date the records start). Only the data access follows 0.7.2: records belong to
-a role (`character_id`), and the role is the member's default one or the one picked with -r.
+drawn with the local Endfield template (gifts at pull milestones, free ten-pulls, the date the
+records start). Only the data access follows 0.7.2: records belong to a role (`character_id`),
+and the role is the member's default one or the one picked with -r.
+
+One picture holds one kind of pool:
+  限定池 and 武器池   each its own picture, one column of pools while that fits; too tall, the
+                      pools go into two columns, then three, and after that into further
+                      pictures (限定池 1/2, 2/2 ...);
+  其他卡池            常驻池, 联合寻访, 新手池 and whatever kind comes later, one column per
+                      kind, three kinds to a picture.
+"Fits" is a height in pixels of the finished picture (MAX_HEIGHT_PX). The pools' heights are
+measured in the browser first, with the page laid out but not drawn.
 
 The upstream handler is replaced as a module attribute (upstream looks it up on every call),
 and its `efgacha` subcommand gets back the `-u` option that 0.7.2 dropped.
@@ -18,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,6 +42,7 @@ from nonebot_plugin_skland import render
 from nonebot_plugin_skland.api import SklandAPI
 from nonebot_plugin_skland.commands import endfield as upstream_endfield
 from nonebot_plugin_skland.commands.selection import check_user_character
+from nonebot_plugin_skland.compact import open_html_page, template_to_html
 from nonebot_plugin_skland.config import TEMPLATES_DIR, config
 from nonebot_plugin_skland.data_source import ef_gacha_pool_data
 from nonebot_plugin_skland.db_handler import get_character_gacha_records
@@ -50,9 +61,16 @@ from plugins import ef_theme
 
 LOCAL_DIR = Path(__file__).with_name("templates")
 TEMPLATE = "ef_gacha.html.jinja2"
-BASE_MIN_WIDTH, JOINT_MIN_WIDTH, VIEWPORT_PADDING = 680, 900, 120  # the page is wider with 联合寻访 pools
+COLUMN_WIDTH, COLUMN_GAP, PAGE_PADDING = 250, 10, 18  # CSS px; a pool card is always this wide
+MAX_COLUMNS = 3
+# Device scale per column count: a narrow picture is drawn larger so that it stays sharp on a phone.
+SCALE = {1: 2.5, 2: 2.0, 3: 1.5}
+# The tallest picture that is sent, in pixels as drawn. WebP ends at 16383 px a side; the pages of
+# members with many pools have been about this tall for weeks and reach QQ fine.
+MAX_HEIGHT_PX = 15000
+OTHER_KINDS = (("standard", "常驻池"), ("joint", "联合寻访"), ("beginner", "新手池"))  # anything else gets its pool name
 CN = timezone(timedelta(hours=8))
-MANY_POOLS = "抽卡记录过多，将以多张图片形式发送"  # plugins.forward_reply_owner recognises this line
+SEVERAL_PICTURES = "抽卡记录将按卡池类型分成多张图片发送"  # plugins.forward_reply_owner recognises this line
 NO_RECORDS = "暂无抽卡记录，请先发送 /zmd抽卡记录更新 拉取数据"
 NO_TOKEN = "这个角色所属的森空岛账号没有保存登录凭证，无法拉取抽卡记录。请重新发送 /skl绑定 扫码"
 SYNC_FAILED = "抽卡记录拉取失败，请稍后再试。如果一直失败，可能是登录凭证过期了，重新发送 /skl绑定 扫码即可"
@@ -98,36 +116,186 @@ def gacha_extras(record) -> dict:
     }
 
 
-# ── the picture ────────────────────────────────────────────────────────
+# ── the pictures ───────────────────────────────────────────────────────
 
 
-async def render_page(record, *, avatar_url: str, nickname: str, role_id: str, begin: int | None = None, limit: int | None = None) -> bytes:
-    """One picture with the pools `begin`..`limit` of every category (all of them when both are None)."""
-    min_width = JOINT_MIN_WIDTH if record.joint_pools else BASE_MIN_WIDTH
-    templates = {
+@dataclass
+class Column:
+    title: str
+    pools: list
+
+
+@dataclass
+class Sheet:
+    """One picture."""
+
+    kind: str  # "special" | "weapon" | "other"
+    title: str
+    columns: list[Column]
+    tiles: tuple[str, ...] = ()
+    part: str = ""  # "1/2" when a kind needs several pictures
+    scale: float = 0.0  # device scale; by column count unless given (the pictures of one set share theirs)
+    label: str = field(init=False, default="")
+
+    def __post_init__(self) -> None:
+        self.label = f"{self.title} {self.part}".strip()
+        self.scale = self.scale or SCALE[min(len(self.columns), MAX_COLUMNS)]
+
+    @property
+    def width(self) -> int:
+        return len(self.columns) * COLUMN_WIDTH + (len(self.columns) - 1) * COLUMN_GAP
+
+    @property
+    def page_width(self) -> int:
+        return self.width + 2 * PAGE_PADDING
+
+    @property
+    def col_width(self) -> int:
+        return COLUMN_WIDTH
+
+    @property
+    def padding(self) -> int:
+        return PAGE_PADDING
+
+
+def _kind(pool) -> str:
+    """Weapons by what was pulled: a rerun weapon pool ("rerun_wpn_...") is not named like the others."""
+    return "weapon" if pool.pool_type == "weapon" else pool.pool_category
+
+
+def _split(heights: list[float], columns: int) -> list[list[int]]:
+    """Consecutive pools into `columns` runs so that the tallest run is as short as possible."""
+    def runs(cap: float) -> list[list[int]]:
+        out, total = [[]], 0.0
+        for i, h in enumerate(heights):
+            if out[-1] and total + COLUMN_GAP + h > cap:
+                out.append([])
+                total = 0.0
+            total += h + (COLUMN_GAP if len(out[-1]) else 0)
+            out[-1].append(i)
+        return out
+
+    low, high = max(heights), sum(heights) + COLUMN_GAP * len(heights)
+    for _ in range(40):
+        middle = (low + high) / 2
+        low, high = (low, middle) if len(runs(middle)) <= columns else (middle, high)
+    return runs(high)
+
+
+def arrange(heights: list[float], chrome: float) -> list[list[list[int]]]:
+    """Pictures -> columns -> pool numbers, for one kind of pool.
+
+    `heights`: the pool cards in CSS px, in display order; `chrome`: everything else on the page.
+    One column if the picture stays under MAX_HEIGHT_PX, else two, else three; beyond that the
+    pools continue on further three-column pictures. A single pool taller than a whole picture
+    still gets its own column.
+    """
+    for columns in range(1, MAX_COLUMNS + 1):
+        runs = _split(heights, columns)
+        tallest = max(sum(heights[i] for i in run) + COLUMN_GAP * (len(run) - 1) for run in runs)
+        if (chrome + tallest) * SCALE[len(runs)] <= MAX_HEIGHT_PX or len(heights) == 1:
+            return [runs]
+    room = MAX_HEIGHT_PX / SCALE[MAX_COLUMNS] - chrome
+    runs, total = [[]], 0.0
+    for i, h in enumerate(heights):
+        if runs[-1] and total + COLUMN_GAP + h > room:
+            runs.append([])
+            total = 0.0
+        total += h + (COLUMN_GAP if runs[-1] else 0)
+        runs[-1].append(i)
+    return [runs[i : i + MAX_COLUMNS] for i in range(0, len(runs), MAX_COLUMNS)]
+
+
+def _templates(record, sheet: Sheet, *, avatar_url: str, nickname: str, role_id: str, extras: dict) -> dict:
+    return {
         "avatar_url": avatar_url,
         "record": record,
         "character": SimpleNamespace(nickname=nickname, role_id=role_id),
-        "ef_gacha_min_width": min_width,
-        "start_index": begin,
-        "end_index": limit,
+        "view": sheet,
         "ef_fonts": ef_theme.fonts_css(),
+        **extras,
     }
-    try:
-        templates.update(gacha_extras(record))
-    except Exception as e:  # the page still renders, only without the marks
-        logger.warning(f"Endfield gacha page: extras unavailable: {type(e).__name__}: {e}")
-        templates.update({"ef_gifts": {}, "ef_since": "", "ef_imported": 0})
+
+
+FILTERS = {"format_timestamp_md": format_timestamp_md, "ef_charId_to_avatarUrl": ef_charId_to_avatarUrl}
+_MEASURE = """async () => {
+  await document.fonts.ready;
+  const pools = [...document.querySelectorAll('.pool')].map(e => e.getBoundingClientRect().height);
+  return {total: document.documentElement.scrollHeight, pools};
+}"""
+
+
+async def measure(record, sheet: Sheet, **context) -> tuple[list[float], float]:
+    """(height of every pool card, height of the rest of the page) with all pools of the sheet in one column."""
+    html = await template_to_html(str(LOCAL_DIR), TEMPLATE, filters=FILTERS, **_templates(record, sheet, **context))
+    viewport = {"width": sheet.page_width, "height": 1}
+    async with open_html_page(html, template_path=LOCAL_DIR.as_uri(), wait_until="domcontentloaded", device_scale_factor=1, viewport=viewport, base_url=TEMPLATES_DIR.as_uri()) as page:
+        sizes = await page.evaluate(_MEASURE)
+    heights = [float(h) for h in sizes["pools"]]
+    return heights, float(sizes["total"]) - sum(heights) - COLUMN_GAP * max(0, len(heights) - 1)
+
+
+async def plan(record, *, begin: int | None = None, limit: int | None = None, **context) -> list[Sheet]:
+    """The pictures for this record, in the order they are sent."""
+    by_kind: dict[str, list] = {}
+    for pool in record.all_pools:
+        by_kind.setdefault(_kind(pool), []).append(pool)
+    if begin is not None or limit is not None:  # -b / -l still count pools per kind
+        by_kind = {kind: pools[begin or 0 : limit] for kind, pools in by_kind.items()}
+    sheets: list[Sheet] = []
+    for kind, title, tiles in (("special", "限定池", ("special",)), ("weapon", "武器池", ("weapon", "arsenal"))):
+        pools = by_kind.pop(kind, [])
+        if not pools:
+            continue
+        try:
+            heights, chrome = await measure(record, Sheet(kind, title, [Column(title, pools)], tiles), **context)
+            pictures = arrange(heights, chrome) if len(heights) == len(pools) else [[list(range(len(pools)))]]
+        except Exception as e:  # one tall column is still a correct picture
+            logger.warning(f"Endfield gacha page: layout not measured ({type(e).__name__}: {e})")
+            pictures = [[list(range(len(pools)))]]
+        for n, runs in enumerate(pictures, 1):
+            columns = [Column(title if not i else f"{title} 续", [pools[j] for j in run]) for i, run in enumerate(runs)]
+            several = len(pictures) > 1  # then every picture was sized for three columns, the last one too
+            sheets.append(Sheet(kind, title, columns, tiles if n == 1 else (), f"{n}/{len(pictures)}" if several else "", SCALE[MAX_COLUMNS] if several else 0.0))
+    names = dict(OTHER_KINDS)
+    others = [(kind, names[kind], by_kind.pop(kind)) for kind, _ in OTHER_KINDS if by_kind.get(kind)]
+    others += [(kind, pools[0].pool_name, pools) for kind, pools in by_kind.items() if pools]
+    groups = [others[i : i + MAX_COLUMNS] for i in range(0, len(others), MAX_COLUMNS)]
+    for n, group in enumerate(groups, 1):
+        tiles = tuple(kind for kind, _, _ in group if kind in names)
+        sheets.append(Sheet("other", "其他卡池", [Column(title, pools) for _, title, pools in group], tiles, f"{n}/{len(groups)}" if len(groups) > 1 else ""))
+    return sheets
+
+
+async def render_sheet(record, sheet: Sheet, **context) -> bytes:
     # render.template_to_pic is looked up at call time: skland_compact_images turns the picture into WebP.
     return await render.template_to_pic(
         template_path=str(LOCAL_DIR),
         template_name=TEMPLATE,
-        templates=templates,
-        filters={"format_timestamp_md": format_timestamp_md, "ef_charId_to_avatarUrl": ef_charId_to_avatarUrl},
-        pages={"viewport": {"width": min_width + VIEWPORT_PADDING, "height": 1}, "base_url": TEMPLATES_DIR.as_uri()},
-        device_scale_factor=1.5,
+        templates=_templates(record, sheet, **context),
+        filters=FILTERS,
+        pages={"viewport": {"width": sheet.page_width, "height": 1}, "base_url": TEMPLATES_DIR.as_uri()},
+        device_scale_factor=sheet.scale,
         screenshot_timeout=config.render_timeout,
     )
+
+
+async def render_pages(record, *, avatar_url: str, nickname: str, role_id: str, begin: int | None = None, limit: int | None = None) -> list[tuple[Sheet, bytes]]:
+    """Every picture of the record with its sheet."""
+    try:
+        extras = gacha_extras(record)
+    except Exception as e:  # the page still renders, only without the marks
+        logger.warning(f"Endfield gacha page: extras unavailable: {type(e).__name__}: {e}")
+        extras = {"ef_gifts": {}, "ef_since": "", "ef_imported": 0}
+    context = {"avatar_url": avatar_url, "nickname": nickname, "role_id": role_id, "extras": extras}
+    sheets = await plan(record, begin=begin, limit=limit, **context)
+    limiter = asyncio.Semaphore(3)
+
+    async def bounded(sheet: Sheet) -> bytes:
+        async with limiter:
+            return await render_sheet(record, sheet, **context)
+
+    return list(zip(sheets, await asyncio.gather(*(bounded(sheet) for sheet in sheets))))
 
 
 # ── the command ────────────────────────────────────────────────────────
@@ -230,38 +398,25 @@ async def ef_gacha_history_handler(
             )
             await session.commit()
 
-    first = begin.result if begin.available else None
-    last = limit.result if limit.available else None
-    render_max = config.ef_gacha_render_max
-    # -b / -l count pools per category; the longest category decides the paging.
-    start = first if first is not None else 0
-    longest = max(len(pools) for pools in (gacha_data.special_pools, gacha_data.weapon_pools, gacha_data.joint_pools, gacha_data.standard_pools, gacha_data.beginner_pools))
-    end = min(last, longest) if last is not None else longest
-
-    async def page(a: int | None, b: int | None) -> bytes:
-        return await render_page(gacha_data, avatar_url=avatar_url, nickname=nickname, role_id=role_id, begin=a, limit=b)
-
-    if max(0, end - start) > render_max:
-        await UniMessage.text(MANY_POOLS).send(reply_to=True)
-        spans = [(i, min(i + render_max, end)) for i in range(start, end, render_max)]
-        limiter = asyncio.Semaphore(4)
-
-        async def bounded(a: int, b: int) -> bytes:
-            async with limiter:
-                return await page(a, b)
-
-        images = await asyncio.gather(*(bounded(a, b) for a, b in spans))
-        if user_session.platform == "QQClient":
-            nodes = [CustomNode(bot.self_id, f"{nickname} | 卡池 {a + 1}-{b}", UniMessage.image(raw=image)) for (a, b), image in zip(spans, images)]
-            await UniMessage.reference(*nodes).send()
-        else:
-            for image in images:
-                await UniMessage.image(raw=image).send()
+    pages = await render_pages(
+        gacha_data, avatar_url=avatar_url, nickname=nickname, role_id=role_id,
+        begin=begin.result if begin.available else None, limit=limit.result if limit.available else None,
+    )
+    if not pages:
+        await UniMessage.text(NO_RECORDS).send(reply_to=True)
+        return
+    if len(pages) == 1:
+        await UniMessage.image(raw=pages[0][1]).send(at_sender=True)
+    elif user_session.platform == "QQClient":
+        await UniMessage.text(SEVERAL_PICTURES).send(reply_to=True)
+        await UniMessage.reference(*(CustomNode(bot.self_id, f"{nickname} | {sheet.label}", UniMessage.image(raw=image)) for sheet, image in pages)).send()
     else:
-        await UniMessage.image(raw=await page(first, last)).send(at_sender=True)
+        for _, image in pages:
+            await UniMessage.image(raw=image).send()
     logger.info(
         f"Endfield gacha page sent: {gacha_data.total_pulls} pulls "
-        f"(characters {gacha_data.char_total_pulls} + weapons {gacha_data.weapon_total_pulls}), {new_count} new"
+        f"(characters {gacha_data.char_total_pulls} + weapons {gacha_data.weapon_total_pulls}), {new_count} new, "
+        f"pictures {[f'{sheet.label} x{len(sheet.columns)}' for sheet, _ in pages]}"
     )
     send_reaction(user_session, "done")
 

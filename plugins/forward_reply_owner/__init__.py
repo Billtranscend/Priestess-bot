@@ -5,7 +5,7 @@ Commands with many pages (/zmd抽卡记录, /抽卡记录, the operator box) ans
 long before it arrives, so in a busy group nobody can tell whose card it is.
 
 QQ cannot put an @ inside such a card or in the same message, so this plugin
-- drops the early notice ("…过多，将以多张图片形式发送"; the reaction already shows progress),
+- drops the early notice ("…过多，将以多张图片形式发送", "…将按卡池类型分成多张图片发送"; the reaction already shows progress),
 - titles the card and its pages with the member's name in this group, and
 - sends one line mentioning the member right after the card has gone out, so the two sit together.
 
@@ -31,7 +31,7 @@ __plugin_meta__ = PluginMetadata(
     type="application",
 )
 
-NOTICE = re.compile(r"^(?P<what>.+?)过多，将以多张图片形式发送$")
+NOTICE = re.compile(r"^(?P<what>.+?)(?:过多，将以多张图片形式发送|将按卡池类型分成多张图片发送)$")
 LABELS = {"干员数量": "干员列表"}
 NAME_LIMIT = 20
 PREVIEW_LINES = 4  # QQ shows at most four lines on a card
@@ -81,11 +81,11 @@ async def _label_forward(bot: Bot, api: str, data: dict[str, Any]) -> None:
     name = _name(event)
     pages = []
     for node in nodes:
-        page = str(node.data["nickname"]).rpartition(" | ")[2]  # upstream: "<in-game name> | 卡池 1-5"
+        page = str(node.data["nickname"]).rpartition(" | ")[2]  # "<in-game name> | 限定池", upstream: "<in-game name> | 第 1 页"
         pages.append(page)
         node.data["nickname"] = f"{name} | {page}"
     if what == "抽卡记录":
-        label = "终末地抽卡记录" if any("卡池" in page for page in pages) else "明日方舟抽卡记录"
+        label = "终末地抽卡记录" if any("池" in page for page in pages) else "明日方舟抽卡记录"  # 限定池 / 武器池 / 其他卡池
     else:
         label = LABELS.get(what, what)
     # NapCat extras for the card: title, preview lines, bottom line, chat-list text.

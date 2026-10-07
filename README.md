@@ -44,7 +44,8 @@ A QQ group bot for Arknights: Endfield / Arknights communities, built on NoneBot
 ### 终末地
 
 - 角色卡（开盒）与全部干员的练度详情
-- 抽卡记录：绑定后和每天自动同步；满抽数的赠送与免费十连单独标出，不计入抽数
+- 抽卡记录：绑定后和每天自动同步；满抽数的赠送与免费十连单独标出，不计入抽数；
+  限定池、武器池、其他卡池各出一张图，卡池多时自动分列、再多则分图
 - 小黑盒导入：补回官方接口已不再提供的早期抽卡记录，官方记录不会被改动，可一键撤销
 - 群内欧非榜
 - 资料库：干员、武器、装备套装资料卡，支持昵称、简称、同音字和模糊匹配；干员卡的每个技能附 Lv9 至 M3 的数值表；
@@ -205,7 +206,6 @@ NapCat 以反向 WebSocket 客户端连入。动态推送可另外搭配
 | `COMMAND_START` | `["/"]` | 指令前缀 |
 | `API_TIMEOUT` | `180` | 等待 NapCat 响应的秒数；上传图片较慢时不要调小 |
 | `LOCALSTORE_USE_CWD` | `true` | 插件数据放在工程目录下的 `data/`、`cache/`、`config/` |
-| `SKLAND__EF_GACHA_RENDER_MAX` | `8` | `/zmd抽卡记录` 单张图里每类卡池最多画几个，超过则分页发送；上游默认 5 |
 
 定时任务使用 `nonebot-plugin-apscheduler` 的默认时区 Asia/Shanghai，与服务器系统时区无关。
 
