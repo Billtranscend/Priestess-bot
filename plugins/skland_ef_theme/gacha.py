@@ -14,8 +14,13 @@ One picture holds one kind of pool:
   限定池 and 武器池   each its own picture, one column of pools while that fits; too tall, the
                       pools go into two columns, then three, and after that into further
                       pictures (限定池 1/2, 2/2 ...);
-  其他卡池            常驻池, 联合寻访, 新手池 and whatever kind comes later, one column per
-                      kind, three kinds to a picture.
+  其他卡池            常驻池 (with the one-off 新手池 under it), 联合寻访, 重构寻访 and whatever
+                      kind comes later, one column per kind, three columns to a picture.
+
+重构寻访 (rerun banners, pool ids "rerun_chr_...") is a pool type upstream neither fetches nor
+knows as a category: /zmd抽卡记录更新 fetches it here after upstream's own sync, and the grouped
+record gets a list of its own instead of being counted as 常驻池. The rerun weapon pool
+("rerun_wpn_...") likewise moves from 常驻池 to the weapon pools.
 "Fits" is a height in pixels of the finished picture (MAX_HEIGHT_PX). The pools' heights are
 measured in the browser first, with the page laid out but not drawn.
 
@@ -49,15 +54,20 @@ from nonebot_plugin_skland.db_handler import get_character_gacha_records
 from nonebot_plugin_skland.exception import SklandException
 from nonebot_plugin_skland.filters import ef_charId_to_avatarUrl, format_timestamp_md
 from nonebot_plugin_skland.matcher import skland_command
-from nonebot_plugin_skland.model import SkUser
+from nonebot_plugin_skland.api import SklandLoginAPI
+from nonebot_plugin_skland.model import GachaRecord, SkUser
+from nonebot_plugin_skland.schemas.endfield.gacha.pool import EfGachaPoolInfo
+from nonebot_plugin_skland.schemas.endfield.gacha.statistics import EfGroupedGachaRecord
 from nonebot_plugin_skland.schemas import CRED
 from nonebot_plugin_skland.services.auth import CredentialState, refresh_credentials
-from nonebot_plugin_skland.services.gacha import group_ef_gacha_records, sync_ef_gacha_records
+from nonebot_plugin_skland.services.gacha import get_all_ef_gacha_records, group_ef_gacha_records, sync_ef_gacha_records
 from nonebot_plugin_skland.utils.message import send_reaction
 from nonebot_plugin_user import UserSession, get_user
 from sqlalchemy import update as sql_update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from plugins import ef_theme
+from plugins.skland_pools import RERUN
 
 LOCAL_DIR = Path(__file__).with_name("templates")
 TEMPLATE = "ef_gacha.html.jinja2"
@@ -68,7 +78,8 @@ SCALE = {1: 2.5, 2: 2.0, 3: 1.5}
 # The tallest picture that is sent, in pixels as drawn. WebP ends at 16383 px a side; the pages of
 # members with many pools have been about this tall for weeks and reach QQ fine.
 MAX_HEIGHT_PX = 15000
-OTHER_KINDS = (("standard", "常驻池"), ("joint", "联合寻访"), ("beginner", "新手池"))  # anything else gets its pool name
+# Columns of the 其他卡池 picture, each a list of (kind, title) stacked in it; a kind not named here gets a column under its pool name.
+OTHER_COLUMNS = ((("standard", "常驻池"), ("beginner", "新手池")), (("joint", "联合寻访"),), (("rerun", "重构寻访"),))
 CN = timezone(timedelta(hours=8))
 SEVERAL_PICTURES = "抽卡记录将按卡池类型分成多张图片发送"  # plugins.forward_reply_owner recognises this line
 NO_RECORDS = "暂无抽卡记录，请先发送 /zmd抽卡记录更新 拉取数据"
@@ -116,13 +127,61 @@ def gacha_extras(record) -> dict:
     }
 
 
+# ── the record: upstream's grouping, corrected ─────────────────────────
+
+
+class Record(EfGroupedGachaRecord):
+    """Upstream's grouped record plus 重构寻访, which it would count among the 常驻池 pools."""
+
+    rerun_pools: list[EfGachaPoolInfo] = []
+
+    @property
+    def char_pools(self) -> list[EfGachaPoolInfo]:
+        return super().char_pools + self.rerun_pools
+
+    @property
+    def char_total_pulls(self) -> int:
+        return super().char_total_pulls + sum(pool.total_pulls for pool in self.rerun_pools)
+
+
+def regroup(grouped: EfGroupedGachaRecord) -> Record:
+    """Take the rerun pools out of 常驻池: character ones into their own list, the weapon one to the weapon pools."""
+    lists = {name: list(getattr(grouped, name)) for name in ("beginner_pools", "standard_pools", "special_pools", "joint_pools", "weapon_pools")}
+    rerun = [pool for pool in lists["standard_pools"] if pool.pool_id.lower().startswith("rerun")]
+    lists["standard_pools"] = [pool for pool in lists["standard_pools"] if pool not in rerun]
+    lists["weapon_pools"] += [pool for pool in rerun if pool.pool_type == "weapon"]
+    newest = lambda pool: max((group.gacha_ts for group in pool.records), default=0)  # noqa: E731
+    return Record(**lists, rerun_pools=sorted((pool for pool in rerun if pool.pool_type != "weapon"), key=newest, reverse=True))
+
+
+async def sync_rerun(session, *, character_id: int, uid: str, server_id: str, access_token: str) -> int:
+    """Fetch the role's 重构寻访 records and save the new ones; returns how many were new."""
+    grant_code = await SklandLoginAPI.get_grant_code(access_token, 1)
+    role_token = await SklandLoginAPI.get_role_token_by_uid(uid, grant_code)
+    added = 0
+    for item in await get_all_ef_gacha_records(server_id, RERUN, role_token):
+        values = dict(
+            character_id=character_id, item_type=item.item_type, pool_id=item.poolId, pool_name=item.poolName, char_id=item.item_id,
+            char_name=item.item_name, rarity=item.rarity, is_new=item.isNew, is_free=item.is_free_pull, gacha_ts=item.gacha_ts_sec, pos=item.seq_id_int,
+        )
+        statement = sqlite_insert(GachaRecord).values(**values).on_conflict_do_nothing(index_elements=["character_id", "gacha_ts", "pos"])
+        added += max((await session.execute(statement)).rowcount, 0)
+    await session.commit()
+    return added
+
+
 # ── the pictures ───────────────────────────────────────────────────────
 
 
 @dataclass
-class Column:
+class Section:
     title: str
     pools: list
+
+
+@dataclass
+class Column:
+    sections: list[Section]
 
 
 @dataclass
@@ -159,8 +218,10 @@ class Sheet:
 
 
 def _kind(pool) -> str:
-    """Weapons by what was pulled: a rerun weapon pool ("rerun_wpn_...") is not named like the others."""
-    return "weapon" if pool.pool_type == "weapon" else pool.pool_category
+    """Weapons by what was pulled, rerun banners by their id; upstream's category for the rest."""
+    if pool.pool_type == "weapon":
+        return "weapon"
+    return "rerun" if pool.pool_id.lower().startswith("rerun") else pool.pool_category
 
 
 def _split(heights: list[float], columns: int) -> list[list[int]]:
@@ -248,22 +309,25 @@ async def plan(record, *, begin: int | None = None, limit: int | None = None, **
         if not pools:
             continue
         try:
-            heights, chrome = await measure(record, Sheet(kind, title, [Column(title, pools)], tiles), **context)
+            heights, chrome = await measure(record, Sheet(kind, title, [Column([Section(title, pools)])], tiles), **context)
             pictures = arrange(heights, chrome) if len(heights) == len(pools) else [[list(range(len(pools)))]]
         except Exception as e:  # one tall column is still a correct picture
             logger.warning(f"Endfield gacha page: layout not measured ({type(e).__name__}: {e})")
             pictures = [[list(range(len(pools)))]]
         for n, runs in enumerate(pictures, 1):
-            columns = [Column(title if not i else f"{title} 续", [pools[j] for j in run]) for i, run in enumerate(runs)]
+            columns = [Column([Section(title if not i else f"{title} 续", [pools[j] for j in run])]) for i, run in enumerate(runs)]
             several = len(pictures) > 1  # then every picture was sized for three columns, the last one too
             sheets.append(Sheet(kind, title, columns, tiles if n == 1 else (), f"{n}/{len(pictures)}" if several else "", SCALE[MAX_COLUMNS] if several else 0.0))
-    names = dict(OTHER_KINDS)
-    others = [(kind, names[kind], by_kind.pop(kind)) for kind, _ in OTHER_KINDS if by_kind.get(kind)]
-    others += [(kind, pools[0].pool_name, pools) for kind, pools in by_kind.items() if pools]
+    others: list[tuple[tuple[str, ...], Column]] = []  # (kinds in the column, column)
+    for stacked in OTHER_COLUMNS:
+        sections = [(kind, Section(title, by_kind.pop(kind))) for kind, title in stacked if by_kind.get(kind)]
+        if sections:
+            others.append((tuple(kind for kind, _ in sections), Column([section for _, section in sections])))
+    others += [((), Column([Section(pools[0].pool_name, pools)])) for pools in by_kind.values() if pools]
     groups = [others[i : i + MAX_COLUMNS] for i in range(0, len(others), MAX_COLUMNS)]
     for n, group in enumerate(groups, 1):
-        tiles = tuple(kind for kind, _, _ in group if kind in names)
-        sheets.append(Sheet("other", "其他卡池", [Column(title, pools) for _, title, pools in group], tiles, f"{n}/{len(groups)}" if len(groups) > 1 else ""))
+        tiles = tuple(kind for kinds, _ in group for kind in kinds)
+        sheets.append(Sheet("other", "其他卡池", [column for _, column in group], tiles, f"{n}/{len(groups)}" if len(groups) > 1 else ""))
     return sheets
 
 
@@ -309,7 +373,7 @@ def _update_requested() -> bool:
 
 async def _pool_marks(gacha_data, server_id: str) -> None:
     """UP operators / weapons of the pools that have them: local table first, the game's API otherwise."""
-    for pool in gacha_data.special_pools + gacha_data.joint_pools + gacha_data.weapon_pools:
+    for pool in gacha_data.special_pools + gacha_data.joint_pools + gacha_data.weapon_pools + gacha_data.rerun_pools:
         local_pool = ef_gacha_pool_data.get_pool(pool.pool_id)
         if local_pool:
             pool.up_six_chars = local_pool.up_six_char_ids
@@ -361,7 +425,7 @@ async def ef_gacha_history_handler(
             await UniMessage(NO_TOKEN).send(at_sender=True)
             return
         try:
-            gacha_data, new_count = await sync_ef_gacha_records(
+            _, new_count = await sync_ef_gacha_records(
                 session, character_id=character_id, uid=uid, server_id=server_id, access_token=credentials.access_token
             )
         except SklandException as e:
@@ -370,9 +434,13 @@ async def ef_gacha_history_handler(
             send_reaction(user_session, "fail")
             await UniMessage(SYNC_FAILED).send(at_sender=True)
             return
-    else:
-        gacha_data = group_ef_gacha_records(await get_character_gacha_records(character_id, session))
-        await session.rollback()
+        try:
+            new_count += await sync_rerun(session, character_id=character_id, uid=uid, server_id=server_id, access_token=credentials.access_token)
+        except Exception as e:  # the other pools are saved and shown; the nightly sync asks again
+            await session.rollback()
+            logger.warning(f"Endfield gacha update: rerun pools not fetched ({type(e).__name__})")
+    gacha_data = regroup(group_ef_gacha_records(await get_character_gacha_records(character_id, session)))
+    await session.rollback()
     if not gacha_data.total_pulls:
         await UniMessage.text("已拉取，暂时没有抽卡记录" if update else NO_RECORDS).send(reply_to=True)
         return

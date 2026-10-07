@@ -376,6 +376,25 @@ img { display: block; }
                 </div>
                 {% endif %}
 {% endif %}
+{% if 'rerun' in view.tiles %}
+                {# 重构寻访统计（上游没有这一类，数值在这里直接算） #}
+                {% set rerun_paid = record.rerun_pools | sum(attribute='paid_pulls') %}
+                {% set rerun_six = record.rerun_pools | sum(attribute='total_six_stars') %}
+                <div class="stat">
+                    <h4>重构寻访</h4>
+                    <div class="big">{{ rerun_paid }}<small>抽</small>{% if record.rerun_pools | sum(attribute='free_pulls') %}<em>另 免费{{ record.rerun_pools | sum(attribute='free_pulls') }}</em>{% endif %}</div>
+                    <div class="kv">
+                        <div>
+                            <b><span class="six">{{ rerun_six }}</span></b>
+                            <small>6★</small>
+                        </div>
+                        <div>
+                            <b>{{ record.rerun_pools[0].pity_count if record.rerun_pools else "-" }}</b>
+                            <small>已垫</small>
+                        </div>
+                    </div>
+                </div>
+{% endif %}
 {% if 'arsenal' in view.tiles %}
             {# 武库配额 #}
             <div class="stat arsenal">
@@ -407,14 +426,16 @@ img { display: block; }
         <div class="cols">
             {% for column in view.columns %}
             <div class="col">
+                {% for section in column.sections %}
                 <div class="ef-sec">
-                    <h3>{{ column.title }}<small>{{ column.pools | sum(attribute='paid_pulls') }}<i>抽</i>{% if column.pools | sum(attribute='free_pulls') %}<em>另 免费{{ column.pools | sum(attribute='free_pulls') }}</em>{% endif %}</small></h3>
+                    <h3>{{ section.title }}<small>{{ section.pools | sum(attribute='paid_pulls') }}<i>抽</i>{% if section.pools | sum(attribute='free_pulls') %}<em>另 免费{{ section.pools | sum(attribute='free_pulls') }}</em>{% endif %}</small></h3>
                     <div class="pools">
-                        {% for pool in column.pools %}
-                        {{ ef_pool_card(pool, column.title, "", gacha_data=record, gifts=ef_gifts) }}
+                        {% for pool in section.pools %}
+                        {{ ef_pool_card(pool, section.title, "", gacha_data=record, gifts=ef_gifts) }}
                         {% endfor %}
                     </div>
                 </div>
+                {% endfor %}
             </div>
             {% endfor %}
         </div>

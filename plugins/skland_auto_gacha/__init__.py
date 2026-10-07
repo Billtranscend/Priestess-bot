@@ -32,6 +32,8 @@ from nonebot_plugin_skland.schemas import EndfieldPoolType
 from nonebot_plugin_skland.services import binding
 from nonebot_plugin_skland.services.gacha import get_all_ef_gacha_records
 
+from plugins.skland_pools import RERUN
+
 from .core import Queue, TZ, record_values
 
 __plugin_meta__ = PluginMetadata(
@@ -44,6 +46,7 @@ STATE = ROOT / "data/skland_auto_gacha/queue.sqlite3"
 DAILY_ID = "skland_auto_efgacha_daily_v1"
 WORKER_ID = "skland_auto_efgacha_worker_v1"
 TRIGGER = CronTrigger(hour=1, minute=0, second=0, timezone=TZ)
+POOL_TYPES = (*EndfieldPoolType, RERUN)  # every kind of pool the official API keeps records for
 _queue: Queue | None = None
 _busy = asyncio.Lock()
 _active: asyncio.Task | None = None
@@ -147,7 +150,7 @@ async def sync_user(owner_id: int) -> tuple[str, int]:
                 grants[role.account_id] = await SklandLoginAPI.get_grant_code(token, 1)
             role_token = await SklandLoginAPI.get_role_token_by_uid(role.uid, grants[role.account_id])
             records = {}
-            for pool in EndfieldPoolType:
+            for pool in POOL_TYPES:
                 for record in await get_all_ef_gacha_records(role.channel_master_id, pool, role_token, concurrency=1):
                     values = record_values(role.id, record)
                     records[(values["gacha_ts"], values["pos"])] = values

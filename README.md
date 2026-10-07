@@ -45,7 +45,8 @@ A QQ group bot for Arknights: Endfield / Arknights communities, built on NoneBot
 
 - 角色卡（开盒）与全部干员的练度详情
 - 抽卡记录：绑定后和每天自动同步；满抽数的赠送与免费十连单独标出，不计入抽数；
-  限定池、武器池、其他卡池各出一张图，卡池多时自动分列、再多则分图
+  限定池、武器池、其他卡池各出一张图，卡池多时自动分列、再多则分图；
+  上游不查询的「重构寻访」（复刻卡池）也会同步并单独成列
 - 小黑盒导入：补回官方接口已不再提供的早期抽卡记录，官方记录不会被改动，可一键撤销
 - 群内欧非榜
 - 资料库：干员、武器、装备套装资料卡，支持昵称、简称、同音字和模糊匹配；干员卡的每个技能附 Lv9 至 M3 的数值表；
@@ -353,6 +354,7 @@ plugins/
   skland_auto_gacha/           抽卡记录每日自动同步
   skland_bind_sign/            绑定规则与保护、/skl添加账号、绑定后的签到与抽卡同步通知
   skland_roles.py              取成员默认角色的公共查询
+  skland_pools.py              上游未收录的卡池类型（重构寻访）
   sqlite_foreign_keys/         为 SQLite 开启外键约束，解绑时角色与抽卡记录随账号一并删除
   skland_shortcuts/            指令别名，上游提示语改写为本机指令名
   skland_reaction_order/       上游指令的「完成」表情改为在回复发出之后再发送
