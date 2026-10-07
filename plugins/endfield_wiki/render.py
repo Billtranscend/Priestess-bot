@@ -6,6 +6,8 @@ from html import escape
 
 from plugins import ef_theme
 
+from .data import SKILL_LEVELS
+
 WIDTH = 1400
 
 CSS = """
@@ -51,6 +53,15 @@ body { width: %dpx; padding: 26px; }
 .form-h { margin-bottom: 2px; }
 .form-h b { display: inline-block; padding: 0 8px; margin-right: 10px; background: var(--ef-ink); color: var(--ef-yellow); font-size: 14px; line-height: 1.7; }
 .form-h .when { font-size: 13px; color: var(--ef-sub); }
+table.vals { border-top: 1px solid var(--ef-line); table-layout: fixed; }
+table.vals th, table.vals td { padding: 5px 8px; font-size: 14px; line-height: 1.5; border-top: 1px solid var(--ef-line-2); }
+table.vals th { width: 36%%; padding-left: 16px; white-space: normal; font-weight: 400; color: #2a2a27; background: var(--ef-panel-2); }
+table.vals td { width: 16%%; text-align: center; font-family: var(--ef-num); font-weight: 600; font-size: 16px; color: var(--ef-ink); border-left: 1px solid var(--ef-line-2); }
+table.vals td.same { color: var(--ef-faint); font-weight: 400; }
+table.vals td:last-child { background: var(--ef-yellow); color: var(--ef-ink); font-weight: 700; }
+table.vals thead th { width: 16%%; background: var(--ef-ink); color: #fff; font-family: var(--ef-num); font-weight: 600; font-size: 15px; letter-spacing: 1px; text-align: center; border: 0; }
+table.vals thead th:first-child { width: 36%%; text-align: left; font-family: inherit; font-size: 13px; letter-spacing: 0; color: var(--ef-yellow); }
+table.vals thead th:last-child { color: var(--ef-yellow); }
 table { width: 100%%; border-collapse: collapse; }
 td, th { border-top: 1px solid var(--ef-line-2); padding: 6px 16px; font-size: 15px; vertical-align: top; text-align: left; }
 tr:first-child td, tr:first-child th { border-top: 0; }
@@ -268,6 +279,20 @@ def equip_set_html(equip_set: dict, icons: dict[str, str], version: str, usage: 
     return _page(head, body, foot)
 
 
+def _skill_table(rows: list[dict]) -> str:
+    """The skill's named values at its last four levels; the column of the top level stands out."""
+    if not rows:
+        return ""
+    head = "".join(f"<th>{escape(level)}</th>" for level in SKILL_LEVELS)
+    body = "".join(
+        f'<tr><th>{escape(row["label"])}</th>'
+        + "".join(f'<td{" class=\"same\"" if i and value == row["values"][i - 1] else ""}>{escape(value)}</td>' for i, value in enumerate(row["values"]))
+        + "</tr>"
+        for row in rows
+    )
+    return f'<table class="vals"><thead><tr><th>技能等级</th>{head}</tr></thead><tbody>{body}</tbody></table>'
+
+
 def _skill_form(form: dict) -> str:
     """What a skill does in one of the operator's two forms."""
     when = f'<span class="when">{form["when"]}</span>' if form.get("when") else ""
@@ -281,7 +306,7 @@ def operator_html(
     skills = "".join(
         _sec(
             f'{escape(s["name"])}<span class="ef-tag d">{escape(s["type"])}</span>',
-            f'<div class="body desc">{s["desc"]}{"".join(_skill_form(form) for form in s.get("forms", ()))}</div>',
+            f'<div class="body desc">{s["desc"]}{"".join(_skill_form(form) for form in s.get("forms", ()))}</div>{_skill_table(s.get("table") or [])}',
         )
         for s in op["skills"]
     )

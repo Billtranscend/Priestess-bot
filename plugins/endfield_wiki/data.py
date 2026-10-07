@@ -67,12 +67,14 @@ TABLES = (
     "ActivityWeeklyTaskTable",
     "ActivityWeeklyTaskMileStoneTable",
 )
-INDEX_SCHEMA = 16  # bump to force a rebuild when the index layout changes
+INDEX_SCHEMA = 17  # bump to force a rebuild when the index layout changes
 # Enemy resistance attribute ids (AttributeShowConfigTable), in the in-game display order.
 ENEMY_RESISTANCES = ((94, "物理"), (98, "灼热"), (97, "电磁"), (96, "寒冷"), (95, "自然"), (99, "超域"))
 TOWER_DIFFICULTIES = {"1": "普通", "2": "困难", "3": "残酷"}
 SKILL_TYPES = {0: "普通攻击", 1: "战技", 3: "连携技", 2: "终结技"}
 SKILL_ORDER = (0, 1, 3, 2)
+SKILL_LEVELS = ("Lv9", "M1", "M2", "M3")  # the last four of a skill's twelve levels, shown in the value table
+COST_LABELS = {1: "技力消耗", 2: "所需终结技能量"}  # what costValue means, by skill group type
 BASE_ATTRS = (("1", "生命值"), ("2", "攻击力"))  # base DEF is always 0 in Endfield; defense comes from gear
 STAT_LEVEL = 90  # current player level cap; tables extend further
 EQUIP_PARTS = {0: "护甲", 1: "护手", 2: "配件"}
@@ -290,6 +292,73 @@ def build_index(table_dir: Path, version: dict, out_file: Path) -> dict[str, int
                 values.setdefault("costvalue", top.get("costValue", 0.0))
         return values
 
+    def level_number(value: float) -> str:
+        return f"{value:g}"
+
+    def level_table(group: dict, form_names: dict[str, str], talent_effects: list[dict]) -> list[dict]:
+        """Rows of the per-level value table of a skill group, as the AKEData character page builds them.
+
+        Cost and cooldown come from the group's first skill; the other rows are the named values
+        (subDescDataList) every skill of the group shows in game, in their order. A value that
+        only applies in one form of the operator carries the form's name.
+        """
+        skill_ids = group.get("skillIdList", [])
+        bundles = [bundle for skill_id in skill_ids if (bundle := skills.get(skill_id, {}).get("SkillPatchDataBundle", []))]
+        if not bundles:
+            return []
+        shown = slice(-len(SKILL_LEVELS), None)
+        rows: list[dict] = []
+        cost = [patch.get("costValue") or 0 for patch in bundles[0]]
+        cooldown = [patch.get("coolDown") or 0 for patch in bundles[0]]
+        kind = group.get("skillGroupType")
+        if any(cost):
+            rows.append({"label": COST_LABELS.get(kind, "消耗"), "values": [level_number(v) for v in cost[shown]]})
+        if any(cooldown):
+            if kind == 3 and len(form_names) > 1:
+                # A talent may shorten the combo skill's cooldown in one form only.
+                for form_id, form_name in form_names.items():
+                    sums, seen = {2: 0.0, 4: 0.0}, set()
+                    for effect in talent_effects:
+                        for item in effect.get("dataList", []):
+                            param = item.get("skillParamModifier") or {}
+                            if param.get("paramType") not in (2, 4) or param.get("modifyType") != 1:
+                                continue
+                            if param.get("skillId") not in skill_ids or form_id not in (item.get("activeCondition") or []):
+                                continue
+                            sums[param["paramType"]] += param.get("paramValue") or 0.0
+                            seen.add(param["paramType"])
+                    shift = sums[4] if 4 in seen else sums[2] if 2 in seen else 0.0
+                    rows.append({"label": f"{form_name} · 冷却时间（秒）", "values": [level_number(v + shift) for v in cooldown[shown]]})
+            else:
+                rows.append({"label": "冷却时间（秒）", "values": [level_number(v) for v in cooldown[shown]]})
+        stagger = re.search(r"\{\s*(\w+)[^{}]*\}(?:</>)?点失衡", text(group.get("desc"))) if kind == 0 else None
+        if stagger:
+            # The heavy attack's stagger is only told in the description ("重击会造成{poise:0}点失衡"); its value
+            # per level is the one the description is filled with (the last skill of the group that sets it).
+            key = stagger.group(1).lower()
+            poise = [next((e["value"] for b in reversed(bundles) for e in b[level].get("blackboard", []) if e["key"].lower() == key), None)
+                     for level in range(len(bundles[0]))]
+            if all(v is not None for v in poise):
+                rows.append({"label": "重击失衡值", "values": [level_number(v) for v in poise[shown]]})
+        for bundle in bundles:
+            named: dict[tuple, dict] = {}
+            for level, patch in enumerate(bundle):
+                occurrence: dict[tuple, int] = {}
+                for sub in patch.get("subDescDataList", []):
+                    name = text(sub.get("name"))
+                    if not name:
+                        continue
+                    form_id = sub.get("conditionId") or ""
+                    nth = occurrence.get((form_id, name), 0)
+                    occurrence[(form_id, name)] = nth + 1
+                    row = named.setdefault(
+                        (form_id, name, nth),
+                        {"label": f"{form_names[form_id]} · {name}" if form_id in form_names else name, "values": [""] * len(bundle)},
+                    )
+                    row["values"][level] = str(sub.get("desc") or "")
+            rows += [{"label": row["label"], "values": row["values"][shown]} for row in named.values()]
+        return rows
+
     # Signature weapons: first tier-1 recommendation of each 6★ operator (verified against community guides).
     signature = {
         cid: rec["weaponIds1"][0]
@@ -307,6 +376,17 @@ def build_index(table_dir: Path, version: dict, out_file: Path) -> dict[str, int
         top = next((a for a in levels if round(a.get("0", 0)) == STAT_LEVEL), max(levels, key=lambda a: a.get("0", 0)) if levels else {})
         stats = [(label, round(top.get(key, 0))) for key, label in BASE_ATTRS]
         stats += [(attr_names.get(k, k), round(top.get(k, 0))) for k in ("39", "40", "41", "42") if k in top]
+
+        # the highest node of each talent, for effects that depend on the operator's form
+        top_talents: dict = {}
+        for node in grow.get("talentNodeMap", {}).values():
+            info = node.get("passiveSkillNodeInfo") or {}
+            if node.get("nodeType") != 4 or not info.get("talentEffectId"):
+                continue
+            best = top_talents.get(info.get("index"))
+            if best is None or (info.get("level", 0), info.get("breakStage", 0)) > (best.get("level", 0), best.get("breakStage", 0)):
+                top_talents[info.get("index")] = info
+        talent_effects = [effects[info["talentEffectId"]] for info in top_talents.values() if info["talentEffectId"] in effects]
 
         skill_rows = []
         groups = sorted(grow.get("skillGroupMap", {}).values(), key=lambda g: SKILL_ORDER.index(g.get("skillGroupType", 0)) if g.get("skillGroupType") in SKILL_ORDER else 9)
@@ -331,6 +411,9 @@ def build_index(table_dir: Path, version: dict, out_file: Path) -> dict[str, int
                     "name": text(group.get("name")),
                     "desc": rich_to_html(fill_placeholders(text(group.get("desc")), values)),
                     "forms": [form for form in forms if form["desc"]],
+                    "table": level_table(
+                        group, {group[f"conditionId{n}"]: text(group.get(f"conditionName{n}")) for n in (1, 2) if group.get(f"conditionId{n}")}, talent_effects
+                    ),
                     "icon": group.get("icon", ""),
                 }
             )
