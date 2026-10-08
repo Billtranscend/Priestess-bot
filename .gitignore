@@ -13,5 +13,8 @@ cache/
 config/
 backups/
 
+# Plugins kept on one machine only (bot.py loads whatever is in this folder)
+local_plugins/
+
 # Render scratch files
 plugins/skl_help/.help.rendered.html

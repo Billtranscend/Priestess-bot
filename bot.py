@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import nonebot
 from nonebot.adapters.onebot.v11 import Adapter as OneBotV11Adapter
 
@@ -44,6 +46,11 @@ load_required_plugin("plugins.game_calendar")
 load_required_plugin("plugins.skland_health")
 load_required_plugin("plugins.heybox_import")
 load_required_plugin("plugins.group_onboarding")
+
+# Plugins kept on this machine only: every package under local_plugins/ (the folder is not part of the repository).
+for _local in sorted(Path(__file__).with_name("local_plugins").glob("*/__init__.py")):
+    load_required_plugin(f"local_plugins.{_local.parent.name}")
+
 nonebot.load_builtin_plugin("echo")
 
 
