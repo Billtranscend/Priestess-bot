@@ -81,9 +81,10 @@ table.lvs tr:last-child th, table.lvs tr:last-child td { background: var(--ef-pa
 .use .bar u { display: block; height: 100%%; background: var(--ef-yellow); border-right: 1px solid var(--ef-ink); }
 .use .row span { flex: none; width: 92px; text-align: right; font-family: var(--ef-num); font-weight: 700; font-size: 17px; }
 .use .row span i { font-style: normal; font-family: var(--ef-cjk); font-weight: 400; font-size: 13px; color: var(--ef-sub); margin-left: 3px; }
-.typ { margin: 4px 16px 0; padding: 10px 0 2px; border-top: 1px solid var(--ef-line-2); font-size: 15px; }
-.typ .tt { font-size: 14px; color: var(--ef-sub); margin-bottom: 2px; }
-.typ .tt b { color: var(--ef-ink); font-size: 16px; }
+.typ { margin: 0 16px; padding: 8px 0 4px; border-top: 2px solid var(--ef-line); font-size: 15px; }
+h3 + .typ { border-top: 0; }
+.typ .use { padding: 0; }
+.typ .use .row b { font-size: 17px; }
 .typ .pc { display: flex; gap: 10px; align-items: flex-start; padding: 7px 0; border-top: 1px dashed var(--ef-line-2); }
 .typ .pc:first-of-type { border-top: 0; }
 .typ .pc img, .typ .pc .ph { flex: none; width: 56px; height: 56px; object-fit: contain; background: var(--ef-panel-2); border: 1px solid var(--ef-line); border-bottom: 3px solid var(--ef-yellow); }
@@ -192,30 +193,34 @@ REFINE_MARGIN = 0.1  # attributes within this of a piece's most refined one are 
 def _builds_box(builds: dict | None, min_sample: int, pieces: dict[str, dict]) -> str:
     """What bound members run on this operator; there is no official recommendation in the game data.
 
-    `pieces` maps a piece name to {"src": icon, "attrs": [attribute names]} for the pieces of the typical build.
+    One block per set, most used first: its share, then the piece members most often wear in each slot. A set
+    after the first that fewer than `min_sample` members run keeps its share only.
+    `pieces` maps a piece name to {"src": icon, "attrs": [attribute names]} for the pieces listed.
     """
     if not builds or builds["n"] < min_sample:
         body = f'<div class="hint">已成套的群友不足 {min_sample} 人，暂无统计。</div>'
         return _sec("群友配装", body)
-    rows = _usage_rows([(name, count, builds["n"]) for name, count in builds["sets"]], "人")
-    typical, refined = "", False
-    for piece in builds["typical"]:
-        info = pieces.get(piece["name"], {})
-        icon = f'<img src="{escape(info["src"])}">' if info.get("src") else '<div class="ph"></div>'
-        chips = ""
-        if piece.get("refine") and info.get("attrs"):  # loose pieces have two attributes, set pieces three
-            refined = True
-            levels = piece["refine"][: len(info["attrs"])]
-            chips = '<div class="rf">' + "".join(
-                f'<span{" class=hot" if level >= 1 and level >= max(levels) - REFINE_MARGIN else ""}>{escape(attr)}<em>{level:.1f}</em></span>'
-                for attr, level in zip(info["attrs"], levels)
-            ) + "</div>"
-        typical += f'<div class="pc">{icon}<div><b>{escape(piece["name"])}</b><small>{escape(piece["slot"])}</small>{chips}</div></div>'
+    blocks, refined = "", False
+    for rank, build in enumerate(builds["builds"]):
+        typical = ""
+        for piece in build["pieces"] if rank == 0 or build["count"] >= min_sample else ():
+            info = pieces.get(piece["name"], {})
+            icon = f'<img src="{escape(info["src"])}">' if info.get("src") else '<div class="ph"></div>'
+            chips = ""
+            if piece.get("refine") and info.get("attrs"):  # loose pieces have two attributes, set pieces three
+                refined = True
+                levels = piece["refine"][: len(info["attrs"])]
+                chips = '<div class="rf">' + "".join(
+                    f'<span{" class=hot" if level >= 1 and level >= max(levels) - REFINE_MARGIN else ""}>{escape(attr)}<em>{level:.1f}</em></span>'
+                    for attr, level in zip(info["attrs"], levels)
+                ) + "</div>"
+            typical += f'<div class="pc">{icon}<div><b>{escape(piece["name"])}</b><small>{escape(piece["slot"])}</small>{chips}</div></div>'
+        share = _usage_rows([(build["set"], build["count"], builds["n"])], "人")
+        blocks += f'<div class="typ"><div class="use">{share}</div>{typical}</div>'
     refine_hint = "词条后的数字是穿这件装备的群友对该词条的平均精锻次数（满 3 次），黄底是这件装备上群友精锻最多的词条。" if refined else ""
     body = (
-        f'<div class="use">{rows}</div>'
-        f'<div class="typ"><div class="tt">常见搭配 · <b>{escape(builds["typical_set"])}</b></div>{typical}</div>'
-        f'<div class="hint">{refine_hint}统计自已绑定群友 Lv70 以上、已凑齐 3 件套的该干员，每天更新；不是官方推荐。发送 /套装名 查看套装详情。</div>'
+        f"{blocks}"
+        f'<div class="hint">每个套装下面是穿这套的群友在各部位最常用的装备。{refine_hint}统计自已绑定群友 Lv70 以上、已凑齐 3 件套的该干员，每天更新；不是官方推荐。发送 /套装名 查看套装详情。</div>'
     )
     return _sec("群友配装", body, f'{builds["n"]} 人已成套')
 

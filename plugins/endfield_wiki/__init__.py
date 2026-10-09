@@ -184,7 +184,8 @@ async def _(state: T_State) -> None:
             stats, min_sample = _builds()
             builds = stats["operators"].get(op["name"])
             items = index.get("equip_items", {})
-            names = [p["name"] for p in builds["typical"] if p["name"] in items] if builds else []
+            worn = {p["name"]: None for build in builds["builds"] for p in build["pieces"]} if builds else {}
+            names = [name for name in worn if name in items]
             srcs = await asyncio.gather(*(_cached_image(data.equip_icon_url(items[n]["icon"]), f"eq_{items[n]['icon']}.png") for n in names))
             pieces = {n: {"src": src, "attrs": items[n]["attrs"]} for n, src in zip(names, srcs)}
             html = render.operator_html(op, icon, version, sig, builds, min_sample, pieces)

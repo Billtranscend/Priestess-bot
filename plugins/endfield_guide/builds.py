@@ -4,8 +4,8 @@ The game has no table of recommended equipment, so the cards show what members a
 Once a day the collection (echoes.EchoStore.collect) also reads each member's Skland card and
 keeps, per operator at MIN_LEVEL or above, the four equipped pieces, their sets and how far each
 of a piece's three attributes was refined (精锻). Only aggregates are shown: how many members run
-which set on an operator, the most common piece per slot, and the average refinement of each
-attribute on that piece. Members who opted out of the statistics are neither fetched nor counted.
+which set on an operator, the most common piece per slot for each of the most used sets, and the
+average refinement of each attribute on that piece. Members who opted out of the statistics are neither fetched nor counted.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ SLOT_LABELS = ("护甲", "护手", "配件")  # the two accessory slots are inte
 MIN_LEVEL = 70  # the top equipment tier needs Lv70; lower operators still wear levelling gear
 SET_PIECES = 3  # pieces that activate a set effect
 MIN_SAMPLE = 3  # fewer builds than this say nothing
+TOP_SETS = 3  # sets listed per operator, most used first
 REFINE_SLOTS = 3  # attributes per piece; each is refined 0-3 times
 BUILD_SCHEMA = 2  # 2: refinement levels per piece
 
@@ -43,7 +44,10 @@ def extract(detail: dict) -> dict[str, dict]:
 
 
 def aggregate(members: dict, exclude: set[str] = frozenset()) -> dict:
-    """{"operators": {name: {n, sets, typical}}, "sets": {name: {n, operators}}} over builds with an active set."""
+    """{"operators": {name: {n, builds}}, "sets": {name: {n, operators}}} over builds with an active set.
+
+    An operator's `builds` are its TOP_SETS most used sets: {"set", "count", "pieces": the most common piece per slot}.
+    """
     by_operator: dict[str, dict] = {}
     by_set: dict[str, Counter] = {}
     refines: dict[tuple[str, str], list[list[int]]] = {}  # (operator, piece) -> refinement levels of every copy worn
@@ -69,17 +73,19 @@ def aggregate(members: dict, exclude: set[str] = frozenset()) -> dict:
                     refines.setdefault((name, equip[0]), []).append(equip[2])
     operators = {}
     for name, entry in by_operator.items():
-        top = entry["sets"].most_common(1)[0][0]
-        body, arm, accessories = entry["pieces"][top]
-        typical = [(label, *counter.most_common(1)[0]) for label, counter in ((SLOT_LABELS[0], +body), (SLOT_LABELS[1], +arm)) if counter]
-        pair, count = accessories.most_common(1)[0]
-        typical += [(SLOT_LABELS[2], piece, count) for piece in pair]
-        pieces = []
-        for slot, piece, count in typical:
-            worn = refines.get((name, piece)) or []
-            average = [round(sum(levels[i] for levels in worn) / len(worn), 1) for i in range(REFINE_SLOTS)] if worn else None
-            pieces.append({"slot": slot, "name": piece, "count": count, "refine": average})
-        operators[name] = {"n": entry["n"], "sets": entry["sets"].most_common(3), "typical_set": top, "typical": pieces}
+        common = []
+        for suit, wearers in entry["sets"].most_common(TOP_SETS):
+            body, arm, accessories = entry["pieces"][suit]
+            typical = [(label, *counter.most_common(1)[0]) for label, counter in ((SLOT_LABELS[0], +body), (SLOT_LABELS[1], +arm)) if counter]
+            pair, count = accessories.most_common(1)[0]
+            typical += [(SLOT_LABELS[2], piece, count) for piece in pair]
+            pieces = []
+            for slot, piece, count in typical:
+                worn = refines.get((name, piece)) or []
+                average = [round(sum(levels[i] for levels in worn) / len(worn), 1) for i in range(REFINE_SLOTS)] if worn else None
+                pieces.append({"slot": slot, "name": piece, "count": count, "refine": average})
+            common.append({"set": suit, "count": wearers, "pieces": pieces})
+        operators[name] = {"n": entry["n"], "builds": common}
     sets = {
         name: {"n": sum(counter.values()), "operators": [(op, count, by_operator[op]["n"]) for op, count in counter.most_common(8)]}
         for name, counter in by_set.items()
