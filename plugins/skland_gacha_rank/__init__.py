@@ -1,4 +1,7 @@
-"""Group-scoped Endfield gacha luck leaderboard (/zmd欧非榜).
+"""Group-scoped Endfield gacha luck leaderboards.
+
+/zmd欧非榜 shows the ten luckiest and ten unluckiest members for the limited character pools and for the
+weapon pools; /角色欧非榜 and /武器欧非榜 list everyone on one of the two boards.
 
 Stats reuse Skland's own grouping and averaging (group_ef_gacha_records), so the
 numbers match /zmd抽卡记录. Only members of the current group who have bound
@@ -9,6 +12,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -40,21 +44,27 @@ from sqlalchemy import select
 
 __plugin_meta__ = PluginMetadata(
     name="Endfield gacha leaderboard",
-    description="Ranks group members by Endfield limited-pool pulls per UP operator.",
-    usage="/zmd欧非榜 | /zmd欧非榜 退出 | /zmd欧非榜 加入",
+    description="Ranks group members by Endfield pulls per UP operator (limited pools) and per UP weapon.",
+    usage="/zmd欧非榜 | /角色欧非榜 | /武器欧非榜 | /zmd欧非榜 退出 | /zmd欧非榜 加入",
     type="application",
 )
 
 PLATFORM = "QQClient"
-CHAR_TOP = 10
-WEAPON_TOP = 5
+TOP = 10  # rows of each lucky / unlucky table on the overview
 MIN_UP = 2  # fewer UPs than this is too small a sample to rank
 WIDTH = 1000
+FULL_COLUMNS = 3  # the full boards read down each column
 REACTION_PROCESSING, REACTION_DONE, REACTION_FAIL = "66", "144", "10060"
 OPTOUT_FILE = store.get_plugin_data_file("optout.json")
 
 gacha_rank = on_command(
     "zmd欧非榜", aliases={"ef欧非榜", "终末地欧非榜", "欧非榜"}, rule=strict, priority=5, block=True
+)
+char_rank = on_command(
+    "zmd角色欧非榜", aliases={"ef角色欧非榜", "终末地角色欧非榜", "角色欧非榜"}, rule=strict, priority=5, block=True
+)
+weapon_rank = on_command(
+    "zmd武器欧非榜", aliases={"ef武器欧非榜", "终末地武器欧非榜", "武器欧非榜"}, rule=strict, priority=5, block=True
 )
 
 
@@ -67,6 +77,47 @@ class Entry:
     special_pulls: int
     weapon_avg: float
     weapon_up: int
+
+
+@dataclass(frozen=True)
+class Board:
+    pool: str  # 角色池 / 武器池
+    command: str
+    english: str
+    basis: str
+    target: str  # what one UP is, with its measure word
+    measure: str
+    empty: str
+    avg: Callable[[Entry], float]
+    count: Callable[[Entry], int]
+
+    def ranked(self, entries: list[Entry]) -> list[Entry]:
+        """Luckiest first; fewer UPs than MIN_UP is not ranked."""
+        return sorted((e for e in entries if self.count(e) >= MIN_UP), key=lambda e: (self.avg(e), -self.count(e)))
+
+
+CHARACTERS = Board(
+    pool="角色池",
+    command="/角色欧非榜",
+    english="Operator",
+    basis="限定池「平均多少抽出一个 UP 干员」",
+    target="一个 UP 干员",
+    measure="个",
+    empty="本群还没有可统计的终末地限定池抽卡记录",
+    avg=lambda e: e.up_avg,
+    count=lambda e: e.up_count,
+)
+WEAPONS = Board(
+    pool="武器池",
+    command="/武器欧非榜",
+    english="Weapon",
+    basis="武器池「平均多少抽出一把 UP 武器」",
+    target="一把 UP 武器",
+    measure="把",
+    empty="本群还没有可统计的终末地武器池抽卡记录",
+    avg=lambda e: e.weapon_avg,
+    count=lambda e: e.weapon_up,
+)
 
 
 def _load_optout() -> set[str]:
@@ -151,6 +202,8 @@ body { width: %dpx; padding: 26px; }
 .mine:before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 8px; background: var(--ef-yellow); }
 .mine b { font-family: var(--ef-num); font-weight: 700; font-size: 24px; color: var(--ef-yellow); padding: 0 2px; }
 .mine i { font-style: normal; font-family: var(--ef-num); font-weight: 600; font-size: 22px; }
+.mine div + div { margin-top: 5px; }
+.mine em { font-style: normal; color: #b9b9b2; }
 .pair { display: flex; gap: 14px; align-items: flex-start; }
 .pair .ef-sec { flex: 1; min-width: 0; }
 .unlucky > h3:before { background: var(--ef-ink); }
@@ -169,85 +222,145 @@ tr:nth-child(1) td.val b { font-weight: 700; background: var(--ef-yellow); paddi
 td.val b { font-weight: 700; }
 td.cnt { width: 96px; text-align: right; font-size: 14px; color: var(--ef-sub); }
 td.cnt b { font-family: var(--ef-num); font-weight: 600; font-size: 18px; color: var(--ef-ink); margin-right: 2px; }
-.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0 18px; padding: 8px 16px 10px; }
+tr.me td { background: rgba(255, 225, 0, .3); }
+tr.me td.nm { font-weight: 700; }
+tr.me td:first-child { box-shadow: inset 4px 0 0 var(--ef-ink); }
+.grid { display: grid; grid-auto-flow: column; grid-template-columns: repeat(%d, 1fr); gap: 0 18px; padding: 8px 16px 10px; }
 .grid span { display: flex; align-items: center; gap: 10px; font-size: 17px; padding: 5px 6px; border-bottom: 1px solid var(--ef-line-2); overflow: hidden; }
 .grid span.me { background: var(--ef-yellow); box-shadow: inset 0 0 0 1px var(--ef-ink); }
 .grid i { font-style: normal; font-family: var(--ef-num); font-weight: 600; font-size: 17px; color: var(--ef-sub); width: 30px; flex: none; text-align: right; }
 .grid span.me i { color: var(--ef-ink); }
 .grid em { font-style: normal; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.grid b { margin-left: auto; font-family: var(--ef-num); font-weight: 700; font-size: 20px; flex: none; }
+.grid u { margin-left: auto; text-decoration: none; font-size: 13px; color: var(--ef-sub); flex: none; }
+.grid b { width: 52px; text-align: right; font-family: var(--ef-num); font-weight: 700; font-size: 20px; flex: none; }
+.grid span.top i { color: var(--ef-ink); font-weight: 700; }
 """
 
 
-def _rows(entries: list[Entry], value, unit: str, count) -> str:
+def _rows(board: Board, entries: list[Entry], requester: str) -> str:
     return "".join(
-        f'<tr><td class="rk"><span>{i}</span></td><td class="nm">{escape(e.name)}</td>'
-        f'<td class="val"><b>{value(e):.1f}</b><small>{unit}</small></td><td class="cnt">{count(e)}</td></tr>'
+        f'<tr class="{"me" if e.qq == requester else ""}"><td class="rk"><span>{i}</span></td><td class="nm">{escape(e.name)}</td>'
+        f'<td class="val"><b>{board.avg(e):.1f}</b><small>抽</small></td>'
+        f'<td class="cnt"><b>{board.count(e)}</b> {board.measure} UP</td></tr>'
         for i, e in enumerate(entries, 1)
     )
 
 
-def _board(title: str, kind: str, rows: str, top: int) -> str:
-    return f'<div class="ef-sec {kind}"><h3>{title}<small>{kind.upper()} · TOP {top}</small></h3><table>{rows}</table></div>'
+def _tables(board: Board, ranked: list[Entry], requester: str) -> str:
+    """The ten luckiest and the ten unluckiest of one board, side by side."""
 
-
-def _render_html(entries: list[Entry], group_total: int, requester: str) -> str:
-    ranked = sorted((e for e in entries if e.up_count >= MIN_UP), key=lambda e: e.up_avg)
-    weapons = sorted((e for e in entries if e.weapon_up >= MIN_UP), key=lambda e: e.weapon_avg)
-    avg = sum(e.up_avg for e in ranked) / len(ranked)
-    char_cols = (lambda e: e.up_avg, "抽", lambda e: f"<b>{e.up_count}</b> 个 UP")
-    weapon_cols = (lambda e: e.weapon_avg, "抽", lambda e: f"<b>{e.weapon_up}</b> 把 UP")
-
-    mine = ""
-    if requester in {e.qq for e in ranked}:
-        pos = next(i for i, e in enumerate(ranked, 1) if e.qq == requester)
-        me = ranked[pos - 1]
-        mine = (
-            f'<div class="mine">你的排名：第 <b>{pos}</b> / <i>{len(ranked)}</i> 名，'
-            f"限定池平均 <b>{me.up_avg:.1f}</b> 抽出一个 UP（共 <i>{me.up_count}</i> 个）</div>"
+    def table(title: str, kind: str, entries: list[Entry]) -> str:
+        return (
+            f'<div class="ef-sec {kind}"><h3>{board.pool} · {title}<small>{kind.upper()} · TOP {TOP}</small></h3>'
+            f"<table>{_rows(board, entries, requester)}</table></div>"
         )
 
-    middle = ranked[CHAR_TOP : max(CHAR_TOP, len(ranked) - CHAR_TOP)]
-    middle_block = ""
-    if middle:
-        cells = "".join(
-            f'<span class="{"me" if e.qq == requester else ""}"><i>{i}</i><em>{escape(e.name)}</em><b>{e.up_avg:.1f}</b></span>'
-            for i, e in enumerate(middle, CHAR_TOP + 1)
-        )
-        middle_block = f'<div class="ef-sec rest"><h3>其余排名（第 {CHAR_TOP + 1}～{CHAR_TOP + len(middle)} 名）</h3><div class="grid">{cells}</div></div>'
+    return f'<div class="pair">{table("欧皇榜", "lucky", ranked[:TOP])}{table("非酋榜", "unlucky", ranked[::-1][:TOP])}</div>'
 
-    weapon_block = ""
-    if weapons:
-        weapon_block = (
-            '<div class="pair">'
-            + _board("武器池 · 欧皇", "lucky", _rows(weapons[:WEAPON_TOP], *weapon_cols), WEAPON_TOP)
-            + _board("武器池 · 非酋", "unlucky", _rows(weapons[::-1][:WEAPON_TOP], *weapon_cols), WEAPON_TOP)
-            + "</div>"
-        )
 
+def _mine(board: Board, ranked: list[Entry], entries: list[Entry], requester: str) -> str:
+    """One line with the requester's place on a board; empty when they have no saved records in this group."""
+    if not any(e.qq == requester for e in entries):
+        return ""
+    label = f"你的{board.pool}排名："
+    pos = next((i for i, e in enumerate(ranked, 1) if e.qq == requester), None)
+    if pos is None:
+        return f"<div>{label}<em>UP 不足 {MIN_UP} {board.measure}，暂未上榜</em></div>"
+    me = ranked[pos - 1]
     return (
-        f'<!doctype html><html><head><meta charset="utf-8"><style>{ef_theme.css()}{CSS % WIDTH}</style></head><body class="ef">'
-        + ef_theme.head(
-            "Endfield · Headhunting Luck Board",
-            "终末地 · <em>本群欧非榜</em>",
-            "按限定池「平均多少抽出一个 UP 干员」排名，越少越欧",
-            f"DATE<b>{datetime.now(ZoneInfo('Asia/Shanghai')):%y-%m-%d}</b>",
-        )
-        + f"""<div class="summary">
-    <div>参与排名<b>{len(ranked)}</b></div>
-    <div>本群有抽卡记录<b>{group_total}</b></div>
-    <div class="hl">群平均 UP 抽数<br><b>{avg:.1f}</b></div>
-  </div>{mine}
-  <div class="pair">"""
-        + _board("欧皇榜", "lucky", _rows(ranked[:CHAR_TOP], *char_cols), CHAR_TOP)
-        + _board("非酋榜", "unlucky", _rows(ranked[::-1][:CHAR_TOP], *char_cols), CHAR_TOP)
-        + f"</div>{middle_block}{weapon_block}"
+        f"<div>{label}第 <b>{pos}</b> / <i>{len(ranked)}</i> 名，"
+        f"平均 <b>{board.avg(me):.1f}</b> 抽出{board.target}（共 <i>{board.count(me)}</i> {board.measure}）</div>"
+    )
+
+
+def _average(board: Board, ranked: list[Entry]) -> float:
+    return sum(board.avg(e) for e in ranked) / len(ranked)
+
+
+def _page(code: str, title: str, subtitle: str, body: str, note: str) -> str:
+    return (
+        f'<!doctype html><html><head><meta charset="utf-8"><style>{ef_theme.css()}{CSS % (WIDTH, FULL_COLUMNS)}</style></head><body class="ef">'
+        + ef_theme.head(code, f"终末地 · <em>{title}</em>", subtitle, f"DATE<b>{datetime.now(ZoneInfo('Asia/Shanghai')):%y-%m-%d}</b>")
+        + body
         + ef_theme.foot(
             f"数据来自已保存的抽卡记录（每天 01:00 自动更新，不含免费十连和当前垫抽），至少出过 {MIN_UP} 个 UP 才参与排名<br>"
-            "不想上榜可发送 /zmd欧非榜 退出，重新加入发送 /zmd欧非榜 加入"
+            f"{note}不想上榜可发送 /zmd欧非榜 退出，重新加入发送 /zmd欧非榜 加入"
         )
         + "</body></html>"
     )
+
+
+def _render_overview(entries: list[Entry], requester: str) -> str | None:
+    """Both boards, top and bottom ten each; None when nobody in the group can be ranked on the character board."""
+    boards = [(b, ranked) for b in (CHARACTERS, WEAPONS) if (ranked := b.ranked(entries))]
+    if not boards or boards[0][0] is not CHARACTERS:
+        return None
+    tiles = "".join(
+        f'<div>{b.pool}上榜<b>{len(ranked)}</b></div><div class="hl">{b.pool}群平均 UP 抽数<br><b>{_average(b, ranked):.1f}</b></div>'
+        for b, ranked in boards
+    )
+    if len(boards) == 1:
+        tiles += f"<div>本群有抽卡记录<b>{len(entries)}</b></div>"
+    mine = "".join(_mine(b, ranked, entries, requester) for b, ranked in boards)
+    return _page(
+        "Endfield · Headhunting Luck Board",
+        "本群欧非榜",
+        f"按「平均多少抽出一个 UP」排名，越少越欧；每个榜只列前 {TOP} 名和后 {TOP} 名",
+        f'<div class="summary">{tiles}</div>'
+        + (f'<div class="mine">{mine}</div>' if mine else "")
+        + "".join(_tables(b, ranked, requester) for b, ranked in boards),
+        f"完整榜单发送 {CHARACTERS.command} 或 {WEAPONS.command}；",
+    )
+
+
+def _render_board(board: Board, entries: list[Entry], requester: str) -> str | None:
+    """Everyone on one board; None when nobody in the group can be ranked on it."""
+    ranked = board.ranked(entries)
+    if not ranked:
+        return None
+    cells = "".join(
+        f'<span class="{"me" if e.qq == requester else "top" if i <= 3 else ""}"><i>{i}</i><em>{escape(e.name)}</em>'
+        f"<u>{board.count(e)} {board.measure}</u><b>{board.avg(e):.1f}</b></span>"
+        for i, e in enumerate(ranked, 1)
+    )
+    mine = _mine(board, ranked, entries, requester)
+    rows = -(-len(ranked) // FULL_COLUMNS)
+    return _page(
+        f"Endfield · {board.english} Luck Board",
+        f"本群{board.pool}欧非榜",
+        f"按{board.basis}排名，越少越欧",
+        f"""<div class="summary">
+    <div>参与排名<b>{len(ranked)}</b></div>
+    <div>最欧<b>{board.avg(ranked[0]):.1f}</b></div>
+    <div>最非<b>{board.avg(ranked[-1]):.1f}</b></div>
+    <div class="hl">群平均 UP 抽数<br><b>{_average(board, ranked):.1f}</b></div>
+  </div>"""
+        + (f'<div class="mine">{mine}</div>' if mine else "")
+        + f'<div class="ef-sec rest"><h3>完整榜单<small class="cjk">名次 · 群名片 · UP 数 · 平均抽数</small></h3><div class="grid" style="grid-template-rows: repeat({rows}, auto)">{cells}</div></div>',
+        "前后十名总览发送 /zmd欧非榜；",
+    )
+
+
+async def _send(matcher, bot: Bot, event: MessageEvent, render: Callable[[list[Entry], str], str | None], empty: str) -> None:
+    if not isinstance(event, GroupMessageEvent):
+        await matcher.finish("欧非榜只能在群里使用")
+
+    await _react(REACTION_PROCESSING)
+    try:
+        entries = await _collect(bot, event.group_id)
+        html = render(entries, str(event.user_id))
+        if html is None:
+            await _react(REACTION_DONE)
+            await matcher.finish(empty)
+        image = await ef_theme.render_page(html, WIDTH, height=600)
+        await UniMessage.image(raw=image).send()
+    except MatcherException:
+        raise
+    except Exception as e:
+        logger.warning(f"Endfield gacha leaderboard failed: {type(e).__name__}")
+        await _react(REACTION_FAIL)
+        raise
+    await _react(REACTION_DONE)
 
 
 @gacha_rank.handle()
@@ -265,22 +378,14 @@ async def _(bot: Bot, event: MessageEvent, arg: Message = CommandArg()) -> None:
         await _react(REACTION_DONE)
         await gacha_rank.finish("已退出欧非榜，不会再出现在任何群的榜单上" if action == "退出" else "已重新加入欧非榜")
 
-    if not isinstance(event, GroupMessageEvent):
-        await gacha_rank.finish("欧非榜只能在群里使用")
+    await _send(gacha_rank, bot, event, _render_overview, CHARACTERS.empty)
 
-    await _react(REACTION_PROCESSING)
-    try:
-        entries = await _collect(bot, event.group_id)
-        if not any(e.up_count >= MIN_UP for e in entries):
-            await _react(REACTION_DONE)
-            await gacha_rank.finish("本群还没有可统计的终末地限定池抽卡记录")
-        html = _render_html(entries, len(entries), qq)
-        image = await ef_theme.render_page(html, WIDTH, height=600)
-        await UniMessage.image(raw=image).send()
-    except MatcherException:
-        raise
-    except Exception as e:
-        logger.warning(f"Endfield gacha leaderboard failed: {type(e).__name__}")
-        await _react(REACTION_FAIL)
-        raise
-    await _react(REACTION_DONE)
+
+@char_rank.handle()
+async def _(bot: Bot, event: MessageEvent) -> None:
+    await _send(char_rank, bot, event, lambda entries, qq: _render_board(CHARACTERS, entries, qq), CHARACTERS.empty)
+
+
+@weapon_rank.handle()
+async def _(bot: Bot, event: MessageEvent) -> None:
+    await _send(weapon_rank, bot, event, lambda entries, qq: _render_board(WEAPONS, entries, qq), WEAPONS.empty)
