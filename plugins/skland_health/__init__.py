@@ -24,6 +24,9 @@ ark_sign / endfield_sign / refresh_token, the binding list / user id queries and
 queries behind the picture commands (cards, rogue, gacha pages) are wrapped to retry network errors. The login calls (QR code, grant code, cred) do not report network errors
 the way the commands expect: they are retried too and then raised as RequestException, so a
 binding that cannot reach Skland answers "绑定失败" instead of ending silently.
+
+The two nightly jobs themselves (00:15 Arknights, 00:20 Endfield) run here on a session of their
+own, saved after every account: see _run_daily_sign at the end of the file.
 """
 
 from __future__ import annotations
@@ -56,15 +59,18 @@ require("nonebot_plugin_skland")
 
 from nonebot_plugin_apscheduler import scheduler
 from nonebot_plugin_orm import get_scoped_session, get_session
+from nonebot_plugin_skland import tasks
 from nonebot_plugin_skland.api import SklandAPI, SklandLoginAPI
 from nonebot_plugin_skland.api.login import skland_app_code
 from nonebot_plugin_skland.account import sync_account
-from nonebot_plugin_skland.db_handler import get_account_characters
+from nonebot_plugin_skland.db_handler import get_account_characters, select_all_accounts
 from nonebot_plugin_skland.exception import RequestException
 from nonebot_plugin_skland.model import Character, CharacterDefault, GachaRecord, SkUser
 from nonebot_plugin_skland.player_data import ark_card_data
 from nonebot_plugin_skland.schemas import CRED
+from nonebot_plugin_skland.services import sign as sign_service
 from sqlalchemy import delete, select
+from sqlalchemy.exc import OperationalError
 
 __plugin_meta__ = PluginMetadata(
     name="Skland health check",
@@ -483,3 +489,51 @@ for _name, _attempts in (("get_scan", 3), ("get_scan_status", 1), ("get_token_by
     _method = getattr(SklandLoginAPI, _name)
     if not getattr(_method, "_network_reported", False):
         setattr(SklandLoginAPI, _name, staticmethod(_report_network(_method, _attempts)))
+
+
+# ── nightly sign-in ─────────────────────────────────────────────────────
+
+COMMIT_TRIES = 4
+
+
+async def _save_tokens(session) -> None:
+    """Commit what a sign-in refreshed; a busy database is waited out, never fatal (the next account's commit carries it)."""
+    for attempt in range(COMMIT_TRIES):
+        try:
+            await session.commit()
+            return
+        except OperationalError as e:
+            if attempt == COMMIT_TRIES - 1:
+                logger.warning(f"Nightly sign-in: tokens not saved yet, database busy ({type(e.orig).__name__})")
+                return
+            await asyncio.sleep(2 * (attempt + 1))
+
+
+async def _run_daily_sign(game) -> None:
+    """One game's nightly sign-in, on a session of its own and saved after every account.
+
+    The plugin runs both jobs on the scoped session, which outside a command is a single session
+    for the whole process: the job that finishes first closes it under the other, which dies with
+    DetachedInstanceError and leaves the rest of its roles unsigned for the day. It also commits
+    only at the end, so one refreshed token keeps the database write-locked for the whole run and
+    every other write in those minutes fails with "database is locked".
+    """
+    entries, broken = [], 0
+    async with get_session(expire_on_commit=False, autoflush=False) as session:
+        for account in await select_all_accounts(session):
+            for character in await get_account_characters(account.id, session):
+                if character.app_code != game:
+                    continue
+                try:
+                    entries.append(await sign_service.sign_character(account, character, game))
+                except Exception as e:  # one role must not end the night for everybody after it
+                    broken += 1
+                    logger.warning(f"Nightly sign-in: a {game} role failed with {type(e).__name__}")
+            if session.dirty:
+                await _save_tokens(session)
+        await _save_tokens(session)
+    sign_service.write_sign_cache(game, entries)
+    logger.info(f"Nightly sign-in ({game}): {len(entries)} roles done" + (f", {broken} ended with an error" if broken else ""))
+
+
+tasks._run_daily_sign = _run_daily_sign

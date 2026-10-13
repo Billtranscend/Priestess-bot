@@ -327,7 +327,6 @@ async def _(event: MessageEvent, user_session: UserSession, session: async_scope
         logger.info(f"Endfield roster: {len(card.chars)} operators, skill levels matched {matched}/{total_skills}")
         image = await ef_theme.render_page(html, WIDTH, scale=SCALE, quality=QUALITY)
         await UniMessage.image(raw=image).send()
-        await session.commit()
     except MatcherException:
         raise
     except Exception as e:
@@ -335,3 +334,7 @@ async def _(event: MessageEvent, user_session: UserSession, session: async_scope
         await _react(REACTION_FAIL)
         await roster.finish("账号详情生成失败，请稍后再试")
     await _react(REACTION_DONE)
+    try:
+        await session.commit()  # only saves a token refreshed on the way
+    except Exception as e:  # the picture is out: a busy database is not a failed command
+        logger.warning(f"Endfield roster: refreshed token not saved ({type(e).__name__})")
