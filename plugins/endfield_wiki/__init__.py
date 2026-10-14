@@ -54,7 +54,7 @@ STATE_FILE = DATA_DIR / "state.json"
 IMAGE_DIR = DATA_DIR / "img"
 ALIASES_FILE = Path(__file__).with_name("aliases.json")
 MISSES_FILE = DATA_DIR / "misses.json"  # unresolved name-like queries (text + count only), for curating aliases
-SYNC_MINUTES = 30  # a conditional request; new data usually appears around 06:00-07:00 Beijing on a game update day
+SYNC_MINUTES = 10  # one small request; new data usually appears around 06:00-07:00 Beijing on a game update day
 MANIFEST_FAILURES_BEFORE_ALERT = 3  # the data site being unreachable for a while is not worth a message
 NOTIFY_GAP = 3.0
 REACTION_PROCESSING, REACTION_DONE, REACTION_FAIL = "66", "144", "10060"
@@ -245,14 +245,10 @@ async def sync(force: bool = False) -> str:
         async with data.http_client() as client:
             outdated = _read_json(INDEX_FILE, {}).get("schema", 1) < data.INDEX_SCHEMA if INDEX_FILE.exists() else True
             force = force or outdated
-            manifest, etag = await data.fetch_manifest(client, None if force else state.get("etag"))
-            if manifest is None:
-                return "数据未变化"
+            manifest = await data.fetch_manifest(client)
             latest = next(v for v in manifest["versions"] if v["id"] == manifest["latest"])
             previous = state.get("version")
             if latest["id"] == previous and INDEX_FILE.exists() and not force:
-                state["etag"] = etag
-                _write_json(STATE_FILE, state)
                 return f"已是最新版本 {previous}"
             _failures["building"] = latest["id"]  # from here on a failure means a new version could not be taken in
             old_index = _read_json(INDEX_FILE, {}) if INDEX_FILE.exists() else {}
@@ -266,7 +262,7 @@ async def sync(force: bool = False) -> str:
         new_index = _read_json(INDEX_FILE, {})
         found = changes.problems(new_index)
         unseen = [item for item in found if item not in set(state.get("problems", []))]
-        _write_json(STATE_FILE, {"version": latest["id"], "etag": etag, "synced_at": time.time(), "problems": found})
+        _write_json(STATE_FILE, {"version": latest["id"], "synced_at": time.time(), "problems": found})
         logger.info(f"Endfield wiki index built for {latest['id']}: {counts}")
     if previous and previous != latest["id"]:
         await _notify_all_groups(latest, previous, changes.added(old_index, new_index))
@@ -311,7 +307,7 @@ async def _sync_succeeded() -> None:
 async def _scheduled_sync() -> None:
     _failures["building"] = None
     try:
-        await sync()
+        logger.info(f"Endfield wiki check: {await sync()}")  # every check leaves a line: when a version was first seen can be read back
     except Exception as e:
         logger.warning(f"Endfield wiki sync failed: {type(e).__name__}: {e}")
         with contextlib.suppress(Exception):

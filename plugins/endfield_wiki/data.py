@@ -89,14 +89,15 @@ def http_client() -> httpx.AsyncClient:
     )
 
 
-async def fetch_manifest(client: httpx.AsyncClient, etag: str | None) -> tuple[dict | None, str | None]:
-    """Return (manifest, etag); manifest is None when unchanged (HTTP 304)."""
-    headers = {"If-None-Match": etag} if etag else {}
-    response = await client.get(MANIFEST_URL, headers=headers)
-    if response.status_code == 304:
-        return None, etag
+async def fetch_manifest(client: httpx.AsyncClient) -> dict:
+    """The version list as the site has it now.
+
+    Always read in full and past any cache: it is a few KB, and comparing its `latest` with the
+    version in the index is the only check that cannot be fooled by a stale ETag or CDN copy.
+    """
+    response = await client.get(MANIFEST_URL, headers={"Cache-Control": "no-cache", "Pragma": "no-cache"})
     response.raise_for_status()
-    return response.json(), response.headers.get("ETag")
+    return response.json()
 
 
 async def download_tables(client: httpx.AsyncClient, table_path: str, target: Path) -> None:
