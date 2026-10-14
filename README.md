@@ -43,7 +43,7 @@ A QQ group bot for Arknights: Endfield / Arknights communities, built on NoneBot
 
 ### 终末地
 
-- 角色卡（开盒）与全部干员的练度详情
+- 终末地角色卡（开盒）：账号概况、据点和全部干员的练度
 - 抽卡记录：绑定后和每天自动同步；满抽数的赠送与免费十连单独标出，不计入抽数；
   限定池、武器池、其他卡池各出一张图，卡池多时自动分列、再多则分图；
   上游不查询的「重构寻访」（复刻卡池）也会同步并单独成列
@@ -219,8 +219,8 @@ NapCat 以反向 WebSocket 客户端连入。动态推送可另外搭配
 
 - 本仓库自己的页面（资料卡、攻略、榜单、周报、欧非榜、帮助图）：`plugins/ef_theme/__init__.py` 的
   `PAGE_SCALE` 与 `PAGE_QUALITY`；
-- `/zmd账号详情`：`plugins/endfield_roster/__init__.py` 顶部的 `SCALE` 与 `QUALITY`，文件内注释给出了各档的实测大小；
-- 上游 nonebot-plugin-skland 渲染的全部图片（开盒、抽卡记录、明日方舟卡片等）：
+- `/zmd开盒`：`plugins/endfield_roster/__init__.py` 顶部的 `SCALE` 与 `QUALITY`，文件内注释给出了各档的实测大小；
+- 上游 nonebot-plugin-skland 渲染的全部图片（抽卡记录、明日方舟卡片等）：
   `plugins/skland_compact_images/__init__.py` 的 `QUALITY`，以及超长页面的缩放阈值。
 
 ## 指令
@@ -244,8 +244,7 @@ NapCat 以反向 WebSocket 客户端连入。动态推送可另外搭配
 
 | 指令 | 作用 | 可 @他人 |
 |---|---|---|
-| `/zmd开盒`、`/zmd开盒 all` | 终末地角色卡 / 展示全部角色 | 是 |
-| `/zmd账号详情`（别名 `/账号详情`） | 全部干员的练度详情图：武器、技能等级、装备 | 是 |
+| `/zmd开盒` | 终末地角色卡：账号概况、据点，全部干员的武器、技能等级和装备 | 是 |
 | `/zmd签到`、`/zmd签到详情` | 手动签到 / 查看签到状态 | 否 |
 | `/zmd抽卡记录`、`/zmd抽卡记录更新` | 查看 / 立即拉取抽卡记录 | 否 |
 | `/zmd导入小黑盒 小黑盒ID` | 从小黑盒补回更早的抽卡记录；只能导入与自己绑定的终末地 UID 相同的小黑盒账号 | 否 |
@@ -342,7 +341,7 @@ plugins/
   ef_theme/                    共享的终末地风格样式与字体
   endfield_wiki/               终末地资料库（AKEData 同步、检索、资料卡）
   endfield_guide/              高难关卡攻略、竞速榜、出场率
-  endfield_roster/             账号详情
+  endfield_roster/             终末地角色卡（/zmd开盒）
   skland_gacha_rank/           欧非榜
   heybox_import/               从小黑盒导入早期抽卡记录
   weekly_report/               群周报
@@ -350,7 +349,7 @@ plugins/
   skland_health/               账号体检（只在登录过期时解绑，接口临时报错不处理）；森空岛请求的网络超时重试
   sanity_reminder/             理智查询与提醒
   skl_help/                    帮助图
-  skland_ef_theme/             开盒与抽卡记录页面的终末地风格模板，上游图片模板的小修正
+  skland_ef_theme/             抽卡记录等页面的终末地风格模板，上游图片模板的小修正
   skland_compact_images/       上游插件渲染的图片统一转为 WebP，超长页面适当缩小
   skland_auto_gacha/           抽卡记录每日自动同步
   skland_bind_sign/            绑定规则与保护、/skl添加账号、绑定后的签到与抽卡同步通知

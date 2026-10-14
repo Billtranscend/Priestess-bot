@@ -63,20 +63,6 @@ CUSTOM_SHORTCUTS = (
     ShortcutSpec(r"(终末地|zmd|ef)签到", "skland efsign sign --all"),
     *_query(r"(终末地|zmd|ef)抽卡记录更新", "skland efgacha -u"),
     *_query(r"(终末地|zmd|ef)抽卡记录", "skland efgacha"),
-    *_query(r"(终末地|zmd|ef)卡片", "skland efcard"),
-    *_query(r"(终末地|zmd|ef)查询", "skland efcard"),
-    ShortcutSpec(
-        r"(终末地|zmd|ef)开盒 all",
-        "skland efcard -a",
-        fuzzy=True,
-        prefix=True,
-    ),
-    ShortcutSpec(
-        r"(终末地|zmd|ef)开盒",
-        "skland efcard",
-        fuzzy=True,
-        prefix=True,
-    ),
     ShortcutSpec(r"(明日方舟|方舟|mrfz)全体签到详情", "skland arksign status --all"),
     ShortcutSpec(r"(明日方舟|方舟|mrfz)全体签到", "skland arksign all"),
     *_query(r"(明日方舟|方舟|mrfz)签到详情", "skland arksign status"),
@@ -103,6 +89,17 @@ CONFLICTING_BUILTINS = (
     r"(ef|zmd)",
     "战争回响",  # 0.7.2 maps it to its own record card; here /战争回响 is the rotation page of endfield_guide
     "森空岛角色",
+)
+
+# Shortcuts this plugin registered before; the shortcut cache keeps them, so they are removed by name.
+# 2026-10-14: /zmd开盒 (with all, 卡片, 查询) is the full roster of plugins.endfield_roster now.
+RETIRED_SHORTCUTS = (
+    r"(终末地|zmd|ef)卡片",
+    r"(终末地|zmd|ef)卡片" + ROLE,
+    r"(终末地|zmd|ef)查询",
+    r"(终末地|zmd|ef)查询" + ROLE,
+    r"(终末地|zmd|ef)开盒 all",
+    r"(终末地|zmd|ef)开盒",
 )
 
 _SHORTCUT_EXTENSION_ID = "builtins.extensions.shortcut:SuperUserShortcutExtension"
@@ -220,7 +217,7 @@ async def _configure_shortcuts() -> None:
 
     for spec in CUSTOM_SHORTCUTS:
         _delete_if_present(spec.pattern)
-    for key in CONFLICTING_BUILTINS:
+    for key in (*CONFLICTING_BUILTINS, *RETIRED_SHORTCUTS):
         _delete_if_present(key)
 
     for spec in CUSTOM_SHORTCUTS:

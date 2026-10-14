@@ -1,21 +1,30 @@
-"""Endfield account roster image (/zmd账号详情 [@用户]).
+"""Endfield account card (/zmd开盒 [@用户] [-r 序号]).
 
-Reuses Skland's binding lookup, token refresh and card API, then renders every
-owned operator with weapon, skill levels and equipment in one image.
+Reuses Skland's binding lookup, token refresh and card API, then renders the account overview
+(stamina, missions, 据点 …) and every owned operator with weapon, skill levels and equipment in
+one image. Since 2026-10-14 this is /zmd开盒 itself: the plugin's own card and its "all" variant
+were retired (the all picture took twice as long to arrive), and the old /账号详情 names only
+point to /zmd开盒.
 """
 
 from __future__ import annotations
 
 import contextlib
+import re
 import time
 from collections import Counter
 from html import escape
 from pathlib import Path
 
 from nonebot import logger, on_command, require
+from nonebot.adapters import Message
 from nonebot.adapters.onebot.v11 import MessageEvent
+from nonebot.consts import PREFIX_KEY, RAW_CMD_KEY
+from nonebot.params import CommandArg
 from nonebot.exception import MatcherException
 from nonebot.plugin import PluginMetadata
+from nonebot.rule import Rule
+from nonebot.typing import T_State
 
 from plugins import ef_theme
 from plugins.strict_command import strict
@@ -30,6 +39,7 @@ from nonebot_plugin_alconna import UniMessage, message_reaction
 from nonebot_plugin_orm import async_scoped_session
 from nonebot_plugin_skland.api import SklandAPI
 from nonebot_plugin_skland.commands.selection import check_user_character
+from nonebot_plugin_skland.filters import format_date_ymd, format_money_wan, get_domain_info
 from nonebot_plugin_skland.model import Character, SkUser
 from nonebot_plugin_skland.schemas import CRED
 from nonebot_plugin_skland.schemas.endfield.card import BodyEquip, EndfieldCard
@@ -39,7 +49,7 @@ from nonebot_plugin_user import UserSession, get_user
 __plugin_meta__ = PluginMetadata(
     name="Endfield roster",
     description="Renders an Endfield account's full operator roster.",
-    usage="/zmd账号详情 [@用户]",
+    usage="/zmd开盒 [@用户] [-r 序号]",
     type="application",
 )
 
@@ -51,6 +61,8 @@ WIDTH = 1320
 SCALE = 1.5
 QUALITY = 55
 REACTION_PROCESSING, REACTION_DONE, REACTION_FAIL = "66", "144", "10060"
+ROLE = re.compile(r"(?:-r|--role)\s*(\d+)")
+CONTROL_CENTER = 0  # spaceShip room type of 总控中枢
 RES_IMAGES = Path(nonebot_plugin_skland.__file__).parent / "resources" / "images" / "endfield"
 
 RARITY_COLOR = {"6": "#FF7101", "5": "#FFCC00", "4": "#A85FD6", "3": "#00B0FF"}
@@ -86,7 +98,7 @@ img { display: block; object-fit: contain; }
 .who p { margin-top: 4px; font-size: 16px; }
 
 /* status tiles */
-.tiles { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-top: 16px; }
+.tiles { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 16px; }
 .tiles div { position: relative; background: var(--ef-panel); border: 1px solid var(--ef-line); border-top: 3px solid var(--ef-ink); padding: 9px 14px 10px; }
 .tiles div:after { content: ""; position: absolute; right: 0; top: 0; width: 18px; height: 4px; background: var(--ef-yellow); }
 .tiles small { font-size: 14px; font-weight: 700; color: var(--ef-ink); }
@@ -142,10 +154,50 @@ img { display: block; object-fit: contain; }
 .suit { font-size: 13px; color: var(--ef-ink); line-height: 1; }
 .suit em { display: inline-block; font-style: normal; line-height: 19px; background: var(--ef-panel); border: 1px solid var(--ef-ink);
   border-left: 4px solid var(--ef-yellow); padding: 0 6px; margin: 2px 4px 2px 0; white-space: nowrap; }
+.domains { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 22px; padding: 8px 16px 12px; }
+.domain .dh { display: flex; align-items: center; gap: 10px; padding: 6px 0 8px; border-bottom: 2px solid var(--ef-ink); }
+.domain .dh b { font-size: 21px; font-weight: 900; }
+.domain .dh .lv { font-family: var(--ef-num); font-weight: 700; font-size: 16px; line-height: 22px; padding: 0 7px; background: var(--ef-ink); color: #f4f4f0; }
+.domain .dh .money { margin-left: auto; font-family: var(--ef-num); font-weight: 600; font-size: 17px; color: var(--ef-sub); }
+.settle { padding: 8px 0 7px; border-bottom: 1px dashed var(--ef-line-2); }
+.settle:last-child { border-bottom: 0; }
+.settle .sl { display: flex; align-items: center; gap: 10px; }
+.settle .of, .settle .of img { width: 36px; height: 36px; flex: none; }
+.settle .of { border: 1px solid var(--ef-line); background: var(--ef-panel-2); overflow: hidden; }
+.settle .sn small { display: block; font-family: var(--ef-num); font-weight: 600; font-size: 13px; line-height: 1; color: var(--ef-sub); }
+.settle .sn span { font-size: 16px; }
+.settle .sv { margin-left: auto; font-family: var(--ef-num); font-weight: 700; font-size: 18px; }
+.settle .bar { height: 4px; margin: 6px 0 0 46px; background: var(--ef-panel-2); }
+.settle .bar u { display: block; height: 100%%; background: var(--ef-yellow); }
 """
 
 
-roster = on_command("zmd账号详情", aliases={"ef账号详情", "终末地账号详情", "账号详情"}, rule=strict, priority=5, block=True)
+async def _card_arguments(event: MessageEvent, state: T_State) -> bool:
+    """Like strict_command, but "/zmd开盒all" and "/zmd开盒-r 2" written without a space count too."""
+    message = event.get_message()
+    if not message or message[0].type != "text":
+        return True
+    raw = state.get(PREFIX_KEY, {}).get(RAW_CMD_KEY) or ""
+    text = str(message[0]).lstrip()
+    if not raw or not text.startswith(raw):
+        return True
+    rest = text[len(raw) :]
+    return not rest or rest[0].isspace() or rest.lower().startswith(("all", "-r", "--role"))
+
+
+roster = on_command(
+    "zmd开盒",
+    aliases={"ef开盒", "终末地开盒", "zmd卡片", "ef卡片", "终末地卡片", "zmd查询", "ef查询", "终末地查询"},
+    rule=Rule(_card_arguments),
+    priority=5,
+    block=True,
+)
+moved = on_command("zmd账号详情", aliases={"ef账号详情", "终末地账号详情", "账号详情"}, rule=strict, priority=5, block=True)
+
+
+@moved.handle()
+async def _() -> None:
+    await moved.finish("账号详情已合并进 /zmd开盒：发送 /zmd开盒 查看自己，/zmd开盒 @某人 查看群友")
 
 
 async def _react(emoji: str) -> None:
@@ -207,6 +259,28 @@ def _skill_cells(char) -> tuple[str, int]:
             f'<div class="skill"><div class="sk-icon">{_img(skill.iconUrl)}</div>{badge}</div>'
         )
     return "".join(cells), matched
+
+
+def _domains(card: EndfieldCard) -> str:
+    """据点 with their settlements, as on the plugin's own card."""
+    if not card.domain:
+        return ""
+    blocks = []
+    for domain in card.domain:
+        money = f'<span class="money">{format_money_wan(domain.moneyMgr.count)} / {format_money_wan(domain.moneyMgr.total)}</span>' if domain.moneyMgr else ""
+        rows = []
+        for s in domain.settlements:
+            total = int(float(s.moneyMax or 0))
+            share = round(int(float(s.remainMoney or 0)) / total * 100) if total > 0 else 0
+            rows.append(
+                f'<div class="settle"><div class="sl"><div class="of">{_img(s.officerCharAvatar)}</div>'
+                f'<div class="sn"><small>Lv.{s.level}</small><span>{escape(s.name)}</span></div>'
+                f'<div class="sv">{format_money_wan(s.remainMoney)} / {format_money_wan(s.moneyMax)}</div></div>'
+                f'<div class="bar"><u style="width:{min(share, 100)}%"></u></div></div>'
+            )
+        name = domain.name or get_domain_info(domain.domainId)["name"]
+        blocks.append(f'<div class="domain"><div class="dh"><b>{escape(name)}</b><span class="lv">Lv.{domain.level}</span>{money}</div>{"".join(rows)}</div>')
+    return f'<div class="ef-sec"><h3>据点<small class="cjk">调度券 · 各聚落库存</small></h3><div class="domains">{"".join(blocks)}</div></div>'
 
 
 def _row(char) -> tuple[str, int]:
@@ -276,6 +350,8 @@ def _render(card: EndfieldCard) -> tuple[str, int, int]:
     stamina_note = "已回满" if cur >= mx or remain <= 0 else f"{int(remain // 3600)}小时{int(remain % 3600 // 60)}分后回满"
     uid = base.roleId[-4:].rjust(len(base.roleId), "*") if base.roleId else ""
 
+    control = next((room.level for room in card.spaceShip.rooms if room.type == CONTROL_CENTER), 0)
+    collections = [c for domain in card.domain for c in domain.collections]
     tiles = [
         ("理智", f"{cur} / {mx}", stamina_note),
         ("日常", f"{card.dailyMission.dailyActivation} / {card.dailyMission.maxDailyActivation}", "活跃度"),
@@ -283,9 +359,15 @@ def _render(card: EndfieldCard) -> tuple[str, int, int]:
         ("通行证", f"{card.bpSystem.curLevel} / {card.bpSystem.maxLevel}", "等级"),
         ("干员", str(base.charNum or len(card.chars)), "已拥有"),
         ("武器", str(base.weaponNum), "已拥有"),
+        ("总控中枢", str(control), "等级"),
+        ("醚质", str(sum(c.puzzleCount for c in collections)), "已收集"),
+        ("储藏箱", str(sum(c.trchestCount for c in collections)), "已开启"),
+        ("光荣之路", str(card.achieve.count), "成就"),
     ]
     tiles_html = "".join(f"<div><small>{a}</small><b>{b}</b><i>{c}</i></div>" for a, b, c in tiles)
     mission = f" · 主线「{escape(base.mainMission.description)}」" if base.mainMission.description else ""
+    woke = f" · 苏醒日 {format_date_ymd(base.createTime)}" if base.createTime else ""
+    server = f" · {escape(base.serverName)}" if base.serverName else ""
 
     html = (
         f'<!doctype html><html><head><meta charset="utf-8"><style>{ef_theme.css()}{CSS % WIDTH}</style></head><body class="ef">'
@@ -295,10 +377,11 @@ def _render(card: EndfieldCard) -> tuple[str, int, int]:
   <div class="who">
     <div class="avatar">{_img(base.avatarUrl)}</div>
     <div><h1>{escape(base.name)}</h1>
-      <p>UID {uid} · {escape(base.serverName)} · 权限等级 {base.level} · 探索等级 {base.worldLevel}{mission}</p></div>
+      <p>UID {uid}{server} · 权限等级 {base.level} · 探索等级 {base.worldLevel}{woke}{mission}</p></div>
   </div>
 </div>
 <div class="tiles">{tiles_html}</div>
+{_domains(card)}
 <div class="ef-sec"><h3>干员数据<small class="cjk">按稀有度、等级与干员编号排序</small></h3>
 {"".join(rows)}
 </div>"""
@@ -309,10 +392,12 @@ def _render(card: EndfieldCard) -> tuple[str, int, int]:
 
 
 @roster.handle()
-async def _(event: MessageEvent, user_session: UserSession, session: async_scoped_session) -> None:
+async def _(event: MessageEvent, user_session: UserSession, session: async_scoped_session, arg: Message = CommandArg()) -> None:
     at = next((seg.data.get("qq") for seg in event.message if seg.type == "at" and seg.data.get("qq") != "all"), None)
     target_id = (await get_user(user_session.platform, str(at))).id if at else user_session.user_id
-    selected = await check_user_character(target_id, user_session, session, app_code="endfield")  # the member's default role
+    role = ROLE.search(arg.extract_plain_text())  # "all" is accepted and ignored: every operator is always shown
+    # the member's default role, or another of their own roles by its number in /skl角色
+    selected = await check_user_character(target_id, user_session, session, app_code="endfield", role_index=int(role[1]) if role else None)
     if selected is None:  # not bound, or no default role: the reason has been sent
         return
     user, character = selected
@@ -332,7 +417,7 @@ async def _(event: MessageEvent, user_session: UserSession, session: async_scope
     except Exception as e:
         logger.warning(f"Endfield roster failed: {type(e).__name__}")
         await _react(REACTION_FAIL)
-        await roster.finish("账号详情生成失败，请稍后再试")
+        await roster.finish("角色卡生成失败，请稍后再试")
     await _react(REACTION_DONE)
     try:
         await session.commit()  # only saves a token refreshed on the way
