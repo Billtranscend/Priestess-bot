@@ -26,6 +26,16 @@ body { width: %dpx; padding: 26px; }
 .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--ef-line-2); border-top: 1px solid var(--ef-line-2); }
 .tile { background: var(--ef-panel); padding: 9px 14px 10px; min-width: 0; }
 .tile.wide { grid-column: span 2; }
+.lgs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 18px; padding: 6px 16px 10px; }
+.lg .lh { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 2px solid var(--ef-ink); }
+.lg .lh img, .lg .lh .ph { width: 40px; height: 40px; flex: none; background: var(--ef-dark); border: 1px solid var(--ef-ink); }
+.lg .lh b { font-size: 20px; font-weight: 900; }
+.lg .lh .ef-tag { margin-left: auto; }
+.lr { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px dashed var(--ef-line-2); }
+.lr:last-child { border-bottom: 0; }
+.lr .px { flex: none; width: 30px; height: 30px; line-height: 30px; text-align: center; font-size: 18px; font-weight: 700; background: var(--ef-ink); color: var(--ef-yellow); }
+.lr .desc { font-size: 15px; line-height: 1.6; }
+.lr small { display: block; margin-top: 2px; font-size: 13px; color: var(--ef-sub); }
 .tile small { display: block; font-size: 13px; color: var(--ef-sub); }
 .tile b { display: block; font-size: 21px; margin-top: 2px; }
 .tile b.n { font-family: var(--ef-num); font-weight: 700; font-size: 28px; line-height: 1.1; letter-spacing: .5px; }
@@ -112,6 +122,10 @@ table.eq .at i { font-style: normal; color: var(--ef-faint); margin: 0 3px; }
 
 def _stars(rarity: int) -> str:
     return f'RARITY<b class="stars">{"★" * rarity}</b>'
+
+
+def _icon(src: str) -> str:
+    return f'<img src="{escape(src)}">' if src else '<div class="ph"></div>'
 
 
 def _img(src: str) -> str:
@@ -305,7 +319,8 @@ def _skill_form(form: dict) -> str:
 
 
 def operator_html(
-    op: dict, icon_src: str, version: str, signature_name: str, builds: dict | None = None, min_sample: int = 3, pieces: dict | None = None
+    op: dict, icon_src: str, version: str, signature_name: str, builds: dict | None = None, min_sample: int = 3, pieces: dict | None = None,
+    logistics_icons: dict[str, str] | None = None,
 ) -> str:
     stats = "".join(f'<div class="tile"><small>{escape(k)}</small><b class="n">{v}</b></div>' for k, v in op["stats"])
     skills = "".join(
@@ -322,6 +337,13 @@ def operator_html(
     potentials = "".join(
         f'<tr><th class="pt">潜能<span>{p["level"]}</span></th><td class="desc"><b>{escape(p["name"])}</b>　{p["desc"]}</td></tr>'
         for p in op["potentials"]
+    )
+    logistics = "".join(
+        f'<div class="lg"><div class="lh">{_icon((logistics_icons or {}).get(slot["icon"], ""))}<b>{escape(slot["name"])}</b>'
+        f'<span class="ef-tag">{escape(slot["room"])}</span></div>'
+        + "".join(f'<div class="lr"><span class="px">{escape(lv["postfix"])}</span><div><div class="desc">{lv["desc"]}</div><small>{escape(lv["unlock"])}</small></div></div>' for lv in slot["levels"])
+        + "</div>"
+        for slot in op.get("logistics", [])
     )
     head = ef_theme.head(
         "Arknights: Endfield · Operator",
@@ -354,6 +376,7 @@ def operator_html(
     {skills}
     {talents}
     {_sec("潜能", f'<table style="margin:6px 0">{potentials}</table>') if potentials else ""}
+    {_sec("后勤技能", f'<div class="lgs">{logistics}</div>', "进驻帝江号舱室时生效") if logistics else ""}
   </div>
 </div>"""
     foot = ef_theme.foot(f'数据来源 AKEData · 干员/{escape(op["name"])}（技能为满级数值）<br>数据版本 {escape(version)}')

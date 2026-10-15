@@ -188,7 +188,9 @@ async def _(state: T_State) -> None:
             names = [name for name in worn if name in items]
             srcs = await asyncio.gather(*(_cached_image(data.equip_icon_url(items[n]["icon"]), f"eq_{items[n]['icon']}.png") for n in names))
             pieces = {n: {"src": src, "attrs": items[n]["attrs"]} for n, src in zip(names, srcs)}
-            html = render.operator_html(op, icon, version, sig, builds, min_sample, pieces)
+            ship = [slot["icon"] for slot in op.get("logistics", []) if slot.get("icon")]
+            ship_srcs = await asyncio.gather(*(_cached_image(data.logistics_icon_url(i), f"ship_{i}.png") for i in ship))
+            html = render.operator_html(op, icon, version, sig, builds, min_sample, pieces, dict(zip(ship, ship_srcs)))
         image = await ef_theme.render_page(html, render.WIDTH, template_path=DATA_DIR.as_uri())
         await UniMessage.image(raw=image).send()
     except MatcherException:

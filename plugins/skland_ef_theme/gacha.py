@@ -52,7 +52,7 @@ from nonebot_plugin_skland.config import TEMPLATES_DIR, config
 from nonebot_plugin_skland.data_source import ef_gacha_pool_data
 from nonebot_plugin_skland.db_handler import get_character_gacha_records
 from nonebot_plugin_skland.exception import SklandException
-from nonebot_plugin_skland.filters import ef_charId_to_avatarUrl, format_timestamp_md
+from nonebot_plugin_skland.filters import format_timestamp_md
 from nonebot_plugin_skland.matcher import skland_command
 from nonebot_plugin_skland.api import SklandLoginAPI
 from nonebot_plugin_skland.model import GachaRecord, SkUser
@@ -278,7 +278,24 @@ def _templates(record, sheet: Sheet, *, avatar_url: str, nickname: str, role_id:
     }
 
 
-FILTERS = {"format_timestamp_md": format_timestamp_md, "ef_charId_to_avatarUrl": ef_charId_to_avatarUrl}
+# Operator and weapon pictures come from AKEData: it has a new version's art on release day, while the
+# plugin's own source (endfieldtools.dev) still answered 404 for 祀 and 玉中身 the day 1.6 came out.
+AKEDATA_SPRITES = "https://data.akedata.wiki/public/images/assets/beyond/dynamicassets/gameplay/ui/sprites"
+
+
+def item_icon(item_id: str) -> str:
+    """Picture of an operator (chr_…) or a weapon (wpn_…); a weapon's picture name comes from the wiki index (a few differ from the id)."""
+    if item_id.startswith("wpn_"):
+        icon = item_id
+        with contextlib.suppress(Exception):
+            from plugins import endfield_wiki
+
+            icon = endfield_wiki._resolver()[0]["weapons"].get(item_id, {}).get("icon") or item_id
+        return f"{AKEDATA_SPRITES}/itemiconbig/{icon}.png"
+    return f"{AKEDATA_SPRITES}/charremoteicon/icon_{item_id}.png"
+
+
+FILTERS = {"format_timestamp_md": format_timestamp_md, "ef_charId_to_avatarUrl": item_icon}
 _MEASURE = """async () => {
   await document.fonts.ready;
   const pools = [...document.querySelectorAll('.pool')].map(e => e.getBoundingClientRect().height);

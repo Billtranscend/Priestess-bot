@@ -57,6 +57,8 @@ TABLES = (
     "EnemyTable",
     "EnemyAttributeTemplateTable",
     "EnemyAbilityDescTable",
+    "SpaceshipCharSkillTable",
+    "SpaceshipSkillTable",
     "ActivityTable",
     "GachaCharPoolTable",
     "GachaWeaponPoolTable",
@@ -68,7 +70,7 @@ TABLES = (
     "ActivityWeeklyTaskTable",
     "ActivityWeeklyTaskMileStoneTable",
 )
-INDEX_SCHEMA = 18  # bump to force a rebuild when the index layout changes (18: leader enemies)
+INDEX_SCHEMA = 19  # bump to force a rebuild when the index layout changes (18: leader enemies, 19: logistics skills)
 # Enemy resistance attribute ids (AttributeShowConfigTable), in the in-game display order.
 ENEMY_RESISTANCES = ((94, "物理"), (98, "灼热"), (97, "电磁"), (96, "寒冷"), (95, "自然"), (99, "超域"))
 TOWER_DIFFICULTIES = {"1": "普通", "2": "困难", "3": "残酷"}
@@ -257,6 +259,20 @@ def build_index(table_dir: Path, version: dict, out_file: Path) -> dict[str, int
         return obj if isinstance(obj, str) else ""
 
     chars, growth = load("CharacterTable"), load("CharGrowthTable")
+    ship_chars, ship_skills = load("SpaceshipCharSkillTable"), load("SpaceshipSkillTable")
+
+    def logistics(cid: str) -> list[dict]:
+        """后勤技能 as on the AKEData character page: one entry per slot, its levels (α/β/γ) with unlock hints."""
+        slots: dict[str, dict] = {}
+        for entry in (ship_chars.get(cid) or {}).get("skillList") or []:
+            skill = ship_skills.get(entry.get("skillId"))
+            if not skill:
+                continue
+            name = text(skill.get("talentName"))
+            slot = slots.setdefault(name, {"name": name, "room": maps["room_type_map"].get(str(skill.get("roomType")), ""), "icon": skill.get("icon", ""), "levels": []})
+            slot["levels"].append({"postfix": skill.get("skillNamePostfix", ""), "desc": rich_to_html(text(skill.get("desc"))), "unlock": text(entry.get("unlockHint"))})
+        return list(slots.values())
+
     potentials, effects = load("CharacterPotentialTable"), load("PotentialTalentEffectTable")
     skills, recommend = load("SkillPatchTable"), load("CharWpnRecommendTable")
     weapons_basic, upgrades, items = load("WeaponBasicTable"), load("WeaponUpgradeTemplateTable"), load("ItemTable")
@@ -460,6 +476,7 @@ def build_index(table_dir: Path, version: dict, out_file: Path) -> dict[str, int
             "skills": skill_rows,
             "talents": sorted(talents.values(), key=lambda t: t["name"]),
             "potentials": potential_rows,
+            "logistics": logistics(cid),
             "signature_weapon": signature.get(cid),
             "recommended": [w for w in recommend.get(cid, {}).get("weaponIds1", [])],
         }
@@ -1109,6 +1126,10 @@ def activity_banner_url(tab: str) -> str:
 
 def equip_icon_url(icon_id: str) -> str:
     return f"{IMAGE_BASE}/itemicon/{icon_id}.png"
+
+
+def logistics_icon_url(icon_id: str) -> str:
+    return f"{IMAGE_BASE}/spaceship/spaceshipskillicon/{icon_id}.png"
 
 
 def char_icon_url(char_id: str) -> str:
