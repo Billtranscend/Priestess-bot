@@ -78,6 +78,8 @@ STAGE_NUMBER = re.compile(r"^第?(\d{1,2})关?$")  # "2" / "第2关": a stage of
 ROTATION_WORDS = ("战争回响", "回响", "本周", "本期")
 MONUMENT_WORDS = ("影拓丰碑", "丰碑")
 ENEMY_USAGE = (
+    "/敌人 领袖敌人名　该敌人的特性和各级默认属性，例：/敌人 祀、/敌人 罗丹\n"
+    "/敌人 领袖　领袖敌人目录\n\n"
     "只看关卡机制和敌人属性（不含通关阵容和视频）\n"
     "/敌人 关卡名 [难度]　例：/敌人 暗曜白霆、/敌人 重伤之围 残酷\n"
     "/敌人 丰碑名　整个丰碑的全部关卡，例：/敌人 幽影刻形\n"
@@ -107,6 +109,40 @@ def _endgame() -> dict:
     """The stage index, with 影拓丰碑 in the game's order (series cover and stage numbers attached)."""
     loaded = wiki._resolver()
     return stages.ordered(loaded[0].get("endgame", {}) if loaded else {}, echo_store.layout())
+
+
+def _leaders() -> list[dict]:
+    loaded = wiki._resolver()
+    return loaded[0].get("leaders", []) if loaded else []
+
+
+LEADER_LIST_WORDS = {"领袖", "领袖敌人", "目录", "列表"}
+
+
+def _leader(query: str) -> tuple[str, object] | None:
+    """('leader', entry) | ('candidates', [names]) | None. Exact name first, then a name containing the query."""
+    leaders, q = _leaders(), normalize(query)
+    if not q:
+        return None
+    named = [(normalize(l["name"]), l) for l in leaders]
+    found = [l for n, l in named if n == q] or ([l for n, l in named if q in n] if len(q) >= 2 else [])
+    names = list(dict.fromkeys(l["name"] for l in found))
+    if len(names) > 1:
+        return "candidates", names
+    if found:  # one name; two entries of it (白垩界卫) -> the one with its own challenge
+        return "leader", max(found, key=lambda l: l["challenge"])
+    return None
+
+
+def _leader_list() -> str:
+    lines, with_challenge = [], {l["name"] for l in _leaders() if l["challenge"]}
+    for l in sorted(_leaders(), key=lambda l: (not l["challenge"], l["name"])):
+        if not l["challenge"] and l["name"] in with_challenge:
+            continue  # 白垩界卫 has a second, challenge-less form; /敌人 shows the one with the challenge
+        lvs = l["levels"]
+        span = f"{lvs[0]['tier']}～{lvs[-1]['tier']}　Lv{lvs[0]['level']}～{lvs[-1]['level']}" if l["challenge"] else "无专属挑战"
+        lines.append(f"· {l['name']}　{span}")
+    return "领袖敌人目录（发 /敌人 名字 查看特性和各级属性）\n" + "\n".join(lines)
 
 
 def _version() -> str:
@@ -321,6 +357,19 @@ async def _(arg: Message = CommandArg(), command: tuple[str, ...] = Command()) -
     query = query or {"回响敌人": "战争回响", "丰碑敌人": "影拓丰碑"}.get(command[0], "")
     if not query:
         await enemy.finish(ENEMY_USAGE)
+    if query in LEADER_LIST_WORDS:
+        await enemy.finish(_leader_list() if _leaders() else "领袖敌人数据尚未同步，请稍后再试")
+    if command[0] == "敌人" and (leader := _leader(query)):
+        if leader[0] == "candidates":
+            await enemy.finish(f"找到多个领袖敌人：{'、'.join(leader[1])}\n请输入更完整的名字")
+        entry = leader[1]
+
+        async def build_leader() -> str:
+            icon = await wiki._cached_image(wiki_data.enemy_icon_url(entry["id"]), f"{entry['id']}.png")
+            return stages.leader_html(ef_theme, entry, icon, _version())
+
+        await _send_page(enemy, build_leader, "敌人资料图生成失败，请稍后再试")
+        return
     series = None
     if query in ROTATION_WORDS:
         current = _rotation(endgame)

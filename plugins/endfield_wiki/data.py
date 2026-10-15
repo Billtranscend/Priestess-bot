@@ -56,6 +56,7 @@ TABLES = (
     "EnemyTemplateDisplayInfoTable",
     "EnemyTable",
     "EnemyAttributeTemplateTable",
+    "EnemyAbilityDescTable",
     "ActivityTable",
     "GachaCharPoolTable",
     "GachaWeaponPoolTable",
@@ -67,7 +68,7 @@ TABLES = (
     "ActivityWeeklyTaskTable",
     "ActivityWeeklyTaskMileStoneTable",
 )
-INDEX_SCHEMA = 17  # bump to force a rebuild when the index layout changes
+INDEX_SCHEMA = 18  # bump to force a rebuild when the index layout changes (18: leader enemies)
 # Enemy resistance attribute ids (AttributeShowConfigTable), in the in-game display order.
 ENEMY_RESISTANCES = ((94, "物理"), (98, "灼热"), (97, "电磁"), (96, "寒冷"), (95, "自然"), (99, "超域"))
 TOWER_DIFFICULTIES = {"1": "普通", "2": "困难", "3": "残酷"}
@@ -502,6 +503,7 @@ def build_index(table_dir: Path, version: dict, out_file: Path) -> dict[str, int
         "equip_sets": build_equip_sets(load, text, maps),
         "equip_items": build_equip_items(load, text, maps),
         "endgame": build_endgame(load, text, maps, table_dir),
+        "leaders": build_leaders(load, text),
         "calendar": build_calendar(load, text),
         "version": version.get("id", ""),
         "published_at": version.get("publishedAt", ""),
@@ -838,6 +840,47 @@ def enemy_stats(row: dict, templates: dict, level: int, effects: list[tuple[list
     stats = {key: round(modified(base.get(attr, 0.0), modifiers, attr)) for attr, key in ((1, "hp"), (2, "atk"), (3, "def"), (20, "poise"))}
     stats["res"] = [[label, value] for attr, label in ENEMY_RESISTANCES if (value := round(modified(base.get(attr, 0.0), modifiers, attr)))]
     return stats
+
+
+LEADER_TYPE = 2  # EnemyTemplateDisplayInfoTable.displayType of 领袖敌人 (DisplayEnemyTypeTable)
+BOSS_CHALLENGE = "dungeon_bossrush"  # 危境遗影 / 延影 / 祸影 / 狂影: one dungeon per tier, enemyLevels gives the tier's level
+
+
+def build_leaders(load, text) -> list[dict]:
+    """Every 领袖敌人 with its traits and its default attributes at the level of each tier of its boss challenge.
+
+    Default means the enemy's own attribute template at that level, as the AKEData enemy page
+    shows it; what a stage adds on top (spawner buffs) belongs to /敌人 关卡名. Born buffs of
+    these enemies carry no attribute modifiers (checked 1.6.3). An enemy without a challenge of
+    its own (a phase or a part of another fight) is shown at STAT_LEVEL.
+    """
+    displays, rows, templates = load("EnemyTemplateDisplayInfoTable"), load("EnemyTable"), load("EnemyAttributeTemplateTable")
+    abilities, dungeons = load("EnemyAbilityDescTable"), load("DungeonTable")
+    template_of = {enemy_id: row.get("templateId") or enemy_id for enemy_id, row in rows.items()}
+    tiers: dict[str, list[tuple[str, dict, int]]] = {}
+    for dungeon_id, dungeon in sorted(dungeons.items()):
+        if dungeon.get("dungeonCategory") != BOSS_CHALLENGE:
+            continue
+        for enemy_id, level in zip(dungeon.get("enemyIds") or [], dungeon.get("enemyLevels") or []):
+            tiers.setdefault(template_of.get(enemy_id, enemy_id), []).append((dungeon_id, dungeon, int(level)))
+    leaders = []
+    for template, display in displays.items():
+        if display.get("displayType") != LEADER_TYPE:
+            continue
+        row = rows.get(template) or {"attrTemplateId": template}
+        levels = [
+            {"tier": text(d.get("dungeonLevelDesc")), "stage": text(d.get("dungeonName")), "level": level, **enemy_stats(row, templates, level)}
+            for _, d, level in tiers.get(template, [])
+        ] or [{"tier": "", "stage": "", "level": STAT_LEVEL, **enemy_stats(row, templates, STAT_LEVEL)}]
+        leaders.append({
+            "id": template,
+            "name": text(display.get("name")),
+            "desc": text(display.get("description")),
+            "traits": [t for a in display.get("abilityDescIds") or [] if (t := text((abilities.get(a) or {}).get("description")))],
+            "challenge": bool(tiers.get(template)),
+            "levels": levels,
+        })
+    return leaders
 
 
 def stage_cover_url(group: dict) -> str:

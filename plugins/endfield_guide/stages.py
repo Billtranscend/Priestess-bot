@@ -198,6 +198,16 @@ td.rs b { font-family: var(--ef-num); font-weight: 700; font-size: 17px; color: 
 .key { font-weight: 700; color: var(--ef-ink); box-shadow: inset 0 -.45em 0 var(--ef-yellow); }
 .term { font-weight: 700; color: var(--ef-ink); border-bottom: 1px dashed var(--ef-ink); }
 .info { color: var(--ef-sub); }
+.boss { display: flex; gap: 16px; margin-top: 16px; align-items: stretch; }
+.boss .face { flex: none; width: 230px; background: var(--ef-dark); border: 1px solid var(--ef-line); border-bottom: 3px solid var(--ef-yellow); }
+.boss .face img, .boss .face .ph { display: block; width: 100%%; aspect-ratio: 1; object-fit: contain; }
+.boss .about { flex: 1; min-width: 0; margin-top: 0; }
+.boss .lore { padding: 12px 16px; font-size: 15px; line-height: 1.75; color: var(--ef-sub); border-bottom: 1px solid var(--ef-line); }
+.trait { display: flex; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--ef-line-2); font-size: 16px; line-height: 1.7; }
+.trait:last-child { border-bottom: 0; }
+.trait .no { margin-top: 2px; }
+td.tr { font-weight: 900; font-size: 17px; }
+td.sg { color: var(--ef-sub); }
 """ + NOTES_CSS
 
 WIDTH = 1100
@@ -387,6 +397,39 @@ def enemies_html(theme, kicker: str, title: str, chips: str, groups: list[dict],
         ENEMY_NOTES,
         "数值怎么读",
     )
+
+
+def leader_html(theme, leader: dict, icon: str, version: str) -> str:
+    """A 领袖敌人: lore, traits and its default attributes at each tier of its 危境 challenge."""
+    rows = []
+    for no, lv in enumerate(leader["levels"]):
+        rows.append(
+            f'<tr class="{"top" if not no else ""}"><td class="tr">{escape(lv["tier"] or "—")}</td><td class="sg">{escape(lv["stage"] or "没有专属挑战")}</td>'
+            f'<td class="lv">Lv{lv["level"]}</td><td class="num">{lv.get("hp", 0):,}</td><td class="num">{lv.get("atk", 0):,}</td>'
+            f'<td class="num">{lv.get("poise", 0):,}</td><td class="rs">{res_html(lv)}</td></tr>'
+        )
+    head = (
+        '<colgroup><col style="width:84px"><col style="width:230px"><col class="c-lv"><col class="c-num"><col class="c-num"><col style="width:110px"><col></colgroup>'
+        '<tr><th>难度</th><th>挑战</th><th>等级</th><th class="num">生命值</th><th class="num">攻击力</th><th class="num">失衡值上限</th><th>抗性</th></tr>'
+    )
+    traits = "".join(f'<div class="trait"><span class="no">{n}</span><div>{escape(t)}</div></div>' for n, t in enumerate(leader["traits"], 1))
+    lore = f'<div class="lore">{escape(leader["desc"])}</div>' if leader["desc"] else ""
+    defense = {lv.get("def") for lv in leader["levels"]}
+    notes = ["默认属性：敌人自身在该等级的数值，不含任何关卡加成"]
+    if len(defense) == 1:
+        notes.append(f"防御力均为 {defense.pop()}")
+    if not leader["challenge"]:
+        notes.append(f"这个敌人没有自己的危境挑战（多为其他战斗的一部分），按 Lv{leader['levels'][0]['level']} 显示")
+    notes.append("在战争回响、影拓丰碑里的数值会被关卡加成改变，请发 /敌人 关卡名")
+    chips = '<span class="live">领袖敌人</span>' + (f'<span>危境挑战 · 共 {len(leader["levels"])} 级</span>' if leader["challenge"] else "")
+    body = (
+        f'<div class="boss"><div class="face">{_img(icon, PLACEHOLDER)}</div>'
+        f'<div class="ef-sec about"><h3>敌人特性</h3>{lore}{traits or '<div class="trait dim">暂无特性说明</div>'}</div></div>'
+        f'<div class="ef-sec"><h3>各级属性</h3><table>{head}{"".join(rows)}</table></div>'
+        f'<div class="note">{"；".join(notes)}</div>'
+    )
+    return _page(theme, theme.head("Arknights: Endfield · Leader Enemy", escape(leader["name"]), chips), body,
+                 f"敌人数据 AKEData · 数据版本 {_version(version)}", ENEMY_NOTES, "数值怎么读")
 
 
 def _version(version: str) -> str:
