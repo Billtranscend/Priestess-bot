@@ -23,6 +23,7 @@ from nonebot_plugin_skland.model import Character, SkUser
 from nonebot_plugin_skland.schemas import CRED
 from nonebot_plugin_user.models import Bind
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 
 from plugins.skland_roles import default_role
 
@@ -101,61 +102,81 @@ class EchoStore:
             data = self.load()
             stats = Counter()
             build_members = builds.load().get("members") or {} if builds else {}
-            async with get_session() as session:
-                # Plain values: the per-member commit below expires ORM objects, and lazily
-                # reloading them outside an await raises MissingGreenlet.
-                binds = (await session.execute(select(Bind.platform_id, Bind.bind_id).where(Bind.platform == "QQClient"))).all()
-                for done, (qq, bind_id) in enumerate(binds, 1):
-                    if done % 20 == 0:
-                        logger.info(f"War Echoes collection progress: {done}/{len(binds)} binds, {dict(stats)}")
-                    if qq in optout:
-                        data["members"].pop(qq, None)
-                        continue
-                    # One entry per member: their default Endfield role (unbound since the last
-                    # run, or no such role: no stale clears on the boards).
-                    selected = await default_role(session, bind_id)
-                    if selected is None:
-                        stats["dropped"] += data["members"].pop(qq, None) is not None
-                        continue
-                    user, char = selected
-                    # An API error code drops the member at once; other failures (network, login) get one
-                    # retry. Members still failing are dropped so stale clears never stay on the boards.
-                    for attempt in range(2):
-                        try:
-                            echoes = await _fetch(WAR_ECHOES_URL, user, char)
-                            records, targets = _extract(echoes["warEchoes"])
-                            await asyncio.sleep(REQUEST_GAP)
-                            monument = await _fetch(INDIE_HARD_URL, user, char)
-                            records.update(_extract_monument(monument["indieHard"]))
-                            if not stats["ok"]:  # the same for every member: one answer per run is enough
-                                self.save_layout(extract_layout(echoes["warEchoes"], monument["indieHard"]))
-                            data["members"][qq] = {"ts": time.time(), "records": records}
-                            data["targets"].update(targets)
-                            stats["ok"] += 1
-                            break
-                        except Exception as e:
-                            if isinstance(e, RecordError) or attempt:
-                                stats[type(e).__name__] += 1
-                                stats["dropped"] += data["members"].pop(qq, None) is not None
-                                break
-                            await asyncio.sleep(REQUEST_GAP * 2)
-                    if builds is not None and qq in data["members"]:
-                        try:  # a failure keeps the member's previous snapshot
-                            await asyncio.sleep(REQUEST_GAP)
-                            card = await _fetch(CARD_URL, user, char)
-                            build_members[qq] = {"ts": time.time(), "chars": extract(card.get("detail") or {})}
-                            stats["builds"] += 1
-                        except Exception as e:
-                            stats[f"builds_{type(e).__name__}"] += 1
-                    # Persist refreshed tokens now: a write left pending across the whole run would hold
-                    # SQLite's write lock for minutes and make binding / gacha updates fail.
-                    await session.commit()
-                    await asyncio.sleep(REQUEST_GAP)
-            data["schema"] = ECHO_SCHEMA
-            self._save(data)
-            if builds is not None:  # members dropped above (unbound, opted out, failing) leave the build statistics too
-                builds.save({qq: member for qq, member in build_members.items() if qq in data["members"]})
+            try:
+                await self._collect_into(data, stats, optout, builds, build_members)
+            finally:  # also after a failure: members already fetched keep their new records, the others their old ones
+                data["schema"] = ECHO_SCHEMA
+                self._save(data)
+                if builds is not None:  # members dropped above (unbound, opted out, failing) leave the build statistics too
+                    builds.save({qq: member for qq, member in build_members.items() if qq in data["members"]})
             return dict(stats)
+
+    async def _collect_into(self, data: dict, stats: Counter, optout: set[str], builds: BuildStore | None, build_members: dict) -> None:
+        async with get_session() as session:
+            # Plain values: the per-member commit below expires ORM objects, and lazily
+            # reloading them outside an await raises MissingGreenlet.
+            binds = (await session.execute(select(Bind.platform_id, Bind.bind_id).where(Bind.platform == "QQClient"))).all()
+            for done, (qq, bind_id) in enumerate(binds, 1):
+                if done % 20 == 0:
+                    logger.info(f"War Echoes collection progress: {done}/{len(binds)} binds, {dict(stats)}")
+                if qq in optout:
+                    data["members"].pop(qq, None)
+                    continue
+                # One entry per member: their default Endfield role (unbound since the last
+                # run, or no such role: no stale clears on the boards).
+                selected = await default_role(session, bind_id)
+                if selected is None:
+                    stats["dropped"] += data["members"].pop(qq, None) is not None
+                    continue
+                user, char = selected
+                # An API error code drops the member at once; other failures (network, login) get one
+                # retry. Members still failing are dropped so stale clears never stay on the boards.
+                for attempt in range(2):
+                    try:
+                        echoes = await _fetch(WAR_ECHOES_URL, user, char)
+                        records, targets = _extract(echoes["warEchoes"])
+                        await asyncio.sleep(REQUEST_GAP)
+                        monument = await _fetch(INDIE_HARD_URL, user, char)
+                        records.update(_extract_monument(monument["indieHard"]))
+                        if not stats["ok"]:  # the same for every member: one answer per run is enough
+                            self.save_layout(extract_layout(echoes["warEchoes"], monument["indieHard"]))
+                        data["members"][qq] = {"ts": time.time(), "records": records}
+                        data["targets"].update(targets)
+                        stats["ok"] += 1
+                        break
+                    except Exception as e:
+                        if isinstance(e, RecordError) or attempt:
+                            stats[type(e).__name__] += 1
+                            stats["dropped"] += data["members"].pop(qq, None) is not None
+                            break
+                        await asyncio.sleep(REQUEST_GAP * 2)
+                if builds is not None and qq in data["members"]:
+                    try:  # a failure keeps the member's previous snapshot
+                        await asyncio.sleep(REQUEST_GAP)
+                        card = await _fetch(CARD_URL, user, char)
+                        build_members[qq] = {"ts": time.time(), "chars": extract(card.get("detail") or {})}
+                        stats["builds"] += 1
+                    except Exception as e:
+                        stats[f"builds_{type(e).__name__}"] += 1
+                # Persist refreshed tokens now: a write left pending across the whole run would hold
+                # SQLite's write lock for minutes and make binding / gacha updates fail.
+                await _commit(session, stats)
+                await asyncio.sleep(REQUEST_GAP)
+
+
+async def _commit(session, stats: Counter) -> None:
+    """Save refreshed tokens; a database locked by another write is waited for, then given up (the token is refreshed again next time).
+
+    On 2026-10-16 one locked commit at member 300 of 404 ended the morning run and threw away everything it had fetched.
+    """
+    for attempt in range(4):
+        try:
+            await session.commit()
+            return
+        except OperationalError:
+            await session.rollback()
+            await asyncio.sleep(3 * (attempt + 1))
+    stats["commit_locked"] += 1
 
 
 async def _fetch(base_url: str, user: SkUser, char: Character) -> dict:
@@ -295,6 +316,32 @@ def usage_rates(data: dict, group_members: set[str], stage_keys: set[str] | None
             total += 1
             counts.update({c["id"] for c in record["team"] if c["id"]})
     return total, counts
+
+
+def partners(data: dict, same: dict[str, str] | None = None, mates_top: int = 6, teams_top: int = 3) -> dict[str, dict]:
+    """Per operator, from members' stored clears: how many members cleared with it, whom they teamed it
+    with and their most common full lineups. A member counts once per teammate and once per lineup, so
+    one member's many clears do not outweigh the others. `same` maps alternative ids to one (管理员)."""
+    same = same or {}
+    users, mates, lineups = Counter(), {}, {}
+    for member in data.get("members", {}).values():
+        with_whom: dict[str, set[str]] = {}
+        teams: dict[str, set[tuple[str, ...]]] = {}
+        for record in member.get("records", {}).values():
+            ids = sorted({same.get(c["id"], c["id"]) for c in record["team"] if c.get("id")})
+            if len(ids) < 2:
+                continue
+            for cid in ids:
+                with_whom.setdefault(cid, set()).update(x for x in ids if x != cid)
+                teams.setdefault(cid, set()).add(tuple(ids))
+        for cid, others in with_whom.items():
+            users[cid] += 1
+            mates.setdefault(cid, Counter()).update(others)
+            lineups.setdefault(cid, Counter()).update(t for t in teams[cid] if len(t) == 4)
+    return {
+        cid: {"n": n, "mates": mates[cid].most_common(mates_top), "teams": [[list(t), c] for t, c in lineups[cid].most_common(teams_top)]}
+        for cid, n in users.items()
+    }
 
 
 def team_stats(data: dict, group_members: set[str], stage_key: str, top: int = 3) -> dict:

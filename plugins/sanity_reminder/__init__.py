@@ -213,6 +213,7 @@ async def _check() -> None:
                     try:
                         user = await _member_for_qq(session, qq)
                         state = await _fetch(session, user, game) if user is not None else None
+                        await session.commit()  # a refreshed token at once: holding the write lock across the whole loop blocked other writes
                     except Exception as e:
                         logger.warning(f"Sanity check failed for one {game} subscriber: {type(e).__name__}")
                         st["checked"] = now

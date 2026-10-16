@@ -51,7 +51,7 @@ from plugins.endfield_wiki.lookup import normalize, to_pinyin
 from . import stages
 from .bili import BiliSearch
 from .builds import BuildStore
-from .echoes import ECHO_SCHEMA, EchoStore, speed_ranking, team_stats, usage_rates
+from .echoes import ECHO_SCHEMA, EchoStore, partners, speed_ranking, team_stats, usage_rates
 
 __plugin_meta__ = PluginMetadata(
     name="Endfield stage guide",
@@ -249,6 +249,20 @@ async def _send_page(matcher, build, fallback: str) -> None:
 
 def _video_text(videos) -> str:
     return "\n".join(f"{i}. {v.title[:40]}\nhttps://www.bilibili.com/video/{v.bvid}" for i, v in enumerate(videos, 1))
+
+
+_partners_cache: dict = {"key": None, "value": {}}
+
+
+def team_partners() -> dict[str, dict]:
+    """Teammates of every operator in members' stored clears (read by endfield_wiki for its cards), recomputed when the clears change."""
+    try:
+        key = echo_store.data_file.stat().st_mtime
+    except OSError:
+        return {}
+    if _partners_cache["key"] != key:
+        _partners_cache.update(key=key, value=partners(_load_echoes(), ENDMIN_IDS))
+    return _partners_cache["value"]
 
 
 def _load_echoes() -> dict:

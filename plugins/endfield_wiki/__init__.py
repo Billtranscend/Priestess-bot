@@ -149,6 +149,15 @@ def _builds() -> tuple[dict, int]:
     return {"operators": {}, "sets": {}}, 3
 
 
+def _partners(operator_id: str) -> dict | None:
+    """Teammates of the operator in members' high-difficulty clears, kept by endfield_guide (None without data)."""
+    with contextlib.suppress(Exception):
+        from plugins import endfield_guide
+
+        return endfield_guide.team_partners().get(operator_id)
+    return None
+
+
 lookup = on_message(rule=_lookup_rule, priority=95, block=True)
 
 
@@ -190,7 +199,12 @@ async def _(state: T_State) -> None:
             pieces = {n: {"src": src, "attrs": items[n]["attrs"]} for n, src in zip(names, srcs)}
             ship = [slot["icon"] for slot in op.get("logistics", []) if slot.get("icon")]
             ship_srcs = await asyncio.gather(*(_cached_image(data.logistics_icon_url(i), f"ship_{i}.png") for i in ship))
-            html = render.operator_html(op, icon, version, sig, builds, min_sample, pieces, dict(zip(ship, ship_srcs)))
+            team = _partners(op["id"])
+            mates = sorted({cid for cid, _ in (team or {}).get("mates", [])} | {cid for ids, _ in (team or {}).get("teams", []) for cid in ids} - {op["id"]})
+            mate_srcs = await asyncio.gather(*(_cached_image(data.char_icon_url(c), f"chr_{c}.png") for c in mates))
+            names = {cid: o["name"] for cid, o in index["operators"].items()}
+            html = render.operator_html(op, icon, version, sig, builds, min_sample, pieces, dict(zip(ship, ship_srcs)),
+                                        team, {c: {"src": s, "name": names.get(c, "")} for c, s in zip(mates, mate_srcs)})
         image = await ef_theme.render_page(html, render.WIDTH, template_path=DATA_DIR.as_uri())
         await UniMessage.image(raw=image).send()
     except MatcherException:

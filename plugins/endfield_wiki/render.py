@@ -92,6 +92,16 @@ table.lvs tr:last-child th, table.lvs tr:last-child td { background: var(--ef-pa
 .use .row span { flex: none; width: 92px; text-align: right; font-family: var(--ef-num); font-weight: 700; font-size: 17px; }
 .use .row span i { font-style: normal; font-family: var(--ef-cjk); font-weight: 400; font-size: 13px; color: var(--ef-sub); margin-left: 3px; }
 .typ { margin: 0 16px; padding: 8px 0 4px; border-top: 2px solid var(--ef-line); font-size: 15px; }
+.mate .row b { display: flex; align-items: center; gap: 8px; width: 150px; }
+.mate .row b img, .mate .row b .ph, .lineup img, .lineup .ph { width: 34px; height: 34px; flex: none; object-fit: cover; background: var(--ef-panel-2); border: 1px solid var(--ef-line); }
+.lineups { margin: 4px 16px 0; padding: 8px 0 2px; border-top: 2px solid var(--ef-line); }
+.lineups .tt { font-size: 14px; color: var(--ef-sub); margin-bottom: 4px; }
+.lineup { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-top: 1px dashed var(--ef-line-2); }
+.lineup:first-of-type { border-top: 0; }
+.lineup img, .lineup .ph { width: 52px; height: 52px; border-bottom: 3px solid var(--ef-yellow); }
+.lineup img.self { border-bottom-color: var(--ef-ink); }
+.lineup span { margin-left: auto; font-family: var(--ef-num); font-weight: 700; font-size: 18px; }
+.lineup span i { font-style: normal; font-family: var(--ef-cjk); font-weight: 400; font-size: 13px; color: var(--ef-sub); margin-left: 3px; }
 h3 + .typ { border-top: 0; }
 .typ .use { padding: 0; }
 .typ .use .row b { font-size: 17px; }
@@ -239,6 +249,32 @@ def _builds_box(builds: dict | None, min_sample: int, pieces: dict[str, dict]) -
     return _sec("群友配装", body, f'{builds["n"]} 人已成套')
 
 
+TEAM_MIN = 3  # members; fewer say nothing
+
+
+def _partners_box(team: dict | None, mates: dict[str, dict], self_id: str, self_src: str) -> str:
+    """Whom members team this operator with in their 战争回响 / 影拓丰碑 clears, and their most common full lineups."""
+    if not team or team["n"] < TEAM_MIN:
+        return _sec("群友组队", f'<div class="hint">用这名干员通关过高难关卡的群友不足 {TEAM_MIN} 人，暂无统计。</div>')
+
+    def face(cid: str, cls: str = "") -> str:
+        src = self_src if cid == self_id else mates.get(cid, {}).get("src", "")
+        return f'<img class="{cls}" src="{escape(src)}">' if src else '<div class="ph"></div>'
+
+    rows = "".join(
+        f'<div class="row"><b>{face(cid)}{escape(mates.get(cid, {}).get("name", cid))}</b><div class="bar"><u style="width:{round(count / team["n"] * 100)}%"></u></div>'
+        f'<span>{round(count / team["n"] * 100)}%<i>{count} 人</i></span></div>'
+        for cid, count in team["mates"]
+    )
+    lineups = "".join(
+        f'<div class="lineup">{"".join(face(c, "self" if c == self_id else "") for c in sorted(ids, key=lambda c: c != self_id))}<span>{count}<i>人</i></span></div>'
+        for ids, count in team["teams"] if count >= 2
+    )
+    body = f'<div class="use mate">{rows}</div>' + (f'<div class="lineups"><div class="tt">常见完整阵容</div>{lineups}</div>' if lineups else "")
+    body += '<div class="hint">统计自已绑定群友的战争回响、影拓丰碑通关阵容，百分比为带过这名干员的群友中与该干员同队过的比例；每人每种组合只计一次，每天更新。</div>'
+    return _sec("群友组队", body, f'{team["n"]} 人带过')
+
+
 def equip_set_html(equip_set: dict, icons: dict[str, str], version: str, usage: dict | None, min_sample: int, asked: str = "") -> str:
     parts: dict[str, list[dict]] = {}
     for piece in equip_set["pieces"]:
@@ -320,7 +356,7 @@ def _skill_form(form: dict) -> str:
 
 def operator_html(
     op: dict, icon_src: str, version: str, signature_name: str, builds: dict | None = None, min_sample: int = 3, pieces: dict | None = None,
-    logistics_icons: dict[str, str] | None = None,
+    logistics_icons: dict[str, str] | None = None, team: dict | None = None, mates: dict[str, dict] | None = None,
 ) -> str:
     stats = "".join(f'<div class="tile"><small>{escape(k)}</small><b class="n">{v}</b></div>' for k, v in op["stats"])
     skills = "".join(
@@ -370,6 +406,7 @@ def operator_html(
       <div class="tiles">{stats}</div>
     </div>
     {_builds_box(builds, min_sample, pieces or {})}
+    {_partners_box(team, mates or {}, op["id"], icon_src)}
   </div>
   <div class="main">
     <div class="mh"><b>干员资料</b><span>Operator Profile</span></div>
