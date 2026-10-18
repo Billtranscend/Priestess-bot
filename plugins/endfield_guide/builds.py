@@ -93,6 +93,22 @@ def aggregate(members: dict, exclude: set[str] = frozenset()) -> dict:
     return {"operators": operators, "sets": sets}
 
 
+def wearers(members: dict, names: set[str], exclude: set[str] = frozenset(), top: int = 8) -> dict:
+    """Builds (Lv70+ operators) wearing at least one of `names`: {"n", "operators": [(operator, wearing, all builds of it)]}.
+
+    For loose pieces, which belong to no set and so are not in aggregate()'s set statistics.
+    """
+    wearing, totals = Counter(), Counter()
+    for qq, member in members.items():
+        if qq in exclude:
+            continue
+        for name, build in (member.get("chars") or {}).items():
+            totals[name] += 1
+            wearing[name] += any(e and e[0] in names for e in build["equips"])
+    wearing = +wearing
+    return {"n": sum(wearing.values()), "operators": [(op, count, totals[op]) for op, count in wearing.most_common(top)]}
+
+
 class BuildStore:
     def __init__(self, data_file: Path) -> None:
         self.data_file = data_file
@@ -113,6 +129,9 @@ class BuildStore:
         tmp.write_text(json.dumps({"schema": BUILD_SCHEMA, "members": members}, ensure_ascii=False), "utf-8")
         tmp.chmod(0o600)
         tmp.replace(self.data_file)
+
+    def wearers(self, names: set[str], exclude: set[str] = frozenset()) -> dict:
+        return wearers(self.load().get("members") or {}, names, exclude)
 
     def stats(self, exclude: set[str] = frozenset()) -> dict:
         """Aggregates, recomputed when the file or the opt-out list changes."""

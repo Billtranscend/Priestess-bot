@@ -248,7 +248,7 @@ def _upcoming_rows(theme, items: list[dict], now: datetime, art: dict[str, str])
     rows = ""
     for a in items:
         until = f'{_moment(a["end"])} 截止 · 持续 {_span(a["end"] - a["start"])}' if a["end"] else "常驻开放"
-        rows += _row(theme, a, f'<div class="dl"><b>{_moment(a["start"])} 开启</b><span>{until}</span></div>', art)
+        rows += _row(theme, a, f'<div class="dl long"><b>{_moment(a["start"])} 开启</b><span>{until}</span></div>', art)
     return rows
 
 

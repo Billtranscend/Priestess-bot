@@ -21,7 +21,7 @@ def names(index: dict) -> dict[str, list[str]]:
     return {
         "干员": [op.get("name", "") for op in (index.get("operators") or {}).values()],
         "武器": [weapon.get("name", "") for weapon in (index.get("weapons") or {}).values()],
-        "套装": [equip_set.get("name", "") for equip_set in (index.get("equip_sets") or {}).values()],
+        "套装": [equip_set.get("name", "") for equip_set in (index.get("equip_sets") or {}).values() if not equip_set.get("loose")],
         "战争回响": [group.get("name", "") for group in (endgame.get("tower") or {}).values()],
         "影拓丰碑": monuments,
     }

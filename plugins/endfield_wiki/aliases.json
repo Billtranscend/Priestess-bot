@@ -396,6 +396,27 @@
       ],
       "signature_weapon": null,
       "recommended_weapon": null
+    },
+    "祀": {
+      "aliases": [
+        "小葱",
+        "Si",
+        "小祀",
+        "祀宝"
+      ],
+      "signature_weapon": "玉中身",
+      "recommended_weapon": null
+    },
+    "明河": {
+      "aliases": [
+        "叶明河",
+        "夜明河",
+        "Minghe",
+        "Argent Flow",
+        "马头"
+      ],
+      "signature_weapon": null,
+      "recommended_weapon": null
     }
   },
   "weapons": {

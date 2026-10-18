@@ -294,43 +294,54 @@ def equip_set_html(equip_set: dict, icons: dict[str, str], version: str, usage: 
                 f'<td><div class="at">{attrs}</div></td></tr>'
             )
         tables += _sec(escape(part), f'<table class="eq">{rows}</table>', f"{len(pieces)} 件可选")
+    loose = bool(equip_set.get("loose"))
     if usage and usage["n"] >= min_sample:
+        share = ("百分比为该干员（Lv70 以上）的群友中至少穿了这个系列一件的比例" if loose else "百分比为该干员已成套的群友中使用本套装的比例")
         use_body = (
             f'<div class="use">{_usage_rows(usage["operators"], "人")}</div>'
-            '<div class="hint">百分比为该干员已成套的群友中使用本套装的比例；统计自已绑定群友 Lv70 以上的干员，每天更新。</div>'
+            f'<div class="hint">{share}；统计自已绑定群友 Lv70 以上的干员，每天更新。</div>'
         )
-        use_box = _sec("群友给谁穿", use_body, f'{usage["n"]} 套')
+        use_box = _sec("群友给谁穿", use_body, f'{usage["n"]} 人在穿' if loose else f'{usage["n"]} 套')
     else:
-        use_box = _sec("群友给谁穿", f'<div class="hint">穿这套的群友不足 {min_sample} 人，暂无统计。</div>')
+        use_box = _sec("群友给谁穿", f'<div class="hint">穿{"这个系列" if loose else "这套"}的群友不足 {min_sample} 人，暂无统计。</div>')
     head = ef_theme.head(
-        "Arknights: Endfield · Equipment Set",
+        "Arknights: Endfield · " + ("Loose Equipment" if loose else "Equipment Set"),
         escape(equip_set["name"]),
-        f'<span class="eng">装备套装 · {escape(equip_set["domain"])}</span>',
+        f'<span class="eng">{"散件（不属于任何套装）" if loose else "装备套装"} · {escape(equip_set["domain"])}</span>',
         _stars(equip_set["rarity"]),
     )
+    count_tile = (
+        '<div class="tile"><small>套装效果</small><b>无</b></div>' if loose
+        else f'<div class="tile"><small>生效件数</small><b><span class="ef-num" style="font-weight:700;font-size:28px">{equip_set["count"]}</span> 件</b></div>'
+    )
+    effect_box = (
+        _sec("套装效果", '<div class="body desc">散件不属于任何套装，没有套装效果。</div>') if loose
+        else _sec(f'套装效果<span class="ef-tag y">{equip_set["count"]} 件</span>', f'<div class="body desc">{equip_set["effect"]}</div>')
+    )
+    wear_note = "每个干员可穿 1 护甲、1 护手、2 配件。" if loose else f'每个干员可穿 1 护甲、1 护手、2 配件，任意 {equip_set["count"]} 件同套装即生效。'
     body = f"""
 <div class="wrap">
   <div class="side">
     <div class="ef-sec">
-      <h3>套装信息</h3>
+      <h3>{"系列信息" if loose else "套装信息"}</h3>
       <div class="tiles">
         <div class="tile"><small>产地</small><b>{escape(equip_set["domain"]) or "—"}</b></div>
         <div class="tile"><small>穿戴等级</small><b class="n">Lv{equip_set["level"]}</b></div>
-        <div class="tile"><small>生效件数</small><b><span class="ef-num" style="font-weight:700;font-size:28px">{equip_set["count"]}</span> 件</b></div>
+        {count_tile}
         <div class="tile"><small>可选装备</small><b><span class="ef-num" style="font-weight:700;font-size:28px">{len(equip_set["pieces"])}</span> 件</b></div>
       </div>
       {f'<div class="note">查询的装备：{escape(asked)}</div>' if asked else ""}
     </div>
-    {_sec(f'套装效果<span class="ef-tag y">{equip_set["count"]} 件</span>', f'<div class="body desc">{equip_set["effect"]}</div>')}
+    {effect_box}
     {use_box}
   </div>
   <div class="main">
     <div class="mh"><b>装备列表</b><span>Equipment</span></div>
     {tables}
-    <div class="hint" style="padding-left:0">属性为 未精锻 → 精锻满级 的数值；每个干员可穿 1 护甲、1 护手、2 配件，任意 {equip_set["count"]} 件同套装即生效。</div>
+    <div class="hint" style="padding-left:0">属性为 未精锻 → 精锻满级 的数值；{wear_note}</div>
   </div>
 </div>"""
-    foot = ef_theme.foot(f'数据来源 AKEData · 装备套装/{escape(equip_set["name"])}<br>数据版本 {escape(version)}')
+    foot = ef_theme.foot(f'数据来源 AKEData · {"装备" if loose else "装备套装"}/{escape(equip_set["name"])}<br>数据版本 {escape(version)}')
     return _page(head, body, foot)
 
 

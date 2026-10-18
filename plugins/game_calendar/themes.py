@@ -41,12 +41,14 @@ body { width: %dpx; padding: 26px; }
 .nm b { font-size: 21px; font-weight: 900; }
 .nm small { flex-basis: 100%%; font-size: 15px; color: var(--ef-sub); }
 .nm .ef-tag { flex: none; }
-.dl { flex: none; text-align: right; }
+.dl { flex: none; width: 210px; text-align: right; }
+.dl.long { width: 290px; }
 .dl b { display: block; font-size: 19px; font-weight: 700; }
 .dl b.perm { font-size: 16px; color: var(--ef-sub); font-weight: 400; }
 .dl span { display: inline-block; margin-top: 3px; font-size: 14px; color: var(--ef-sub); }
 .dl span.hot { color: #fff; background: var(--ef-red); padding: 0 7px; font-weight: 700; }
-/* the activity's banner between name and deadline; the row's left edge takes the activity's colour */
+/* the deadline column has a fixed width (two widths: upcoming rows carry a longer second line), so every banner of a section ends at the same place.
+   the activity's banner between name and deadline; the row's left edge takes the activity's colour */
 .row.pic { padding-top: 0; padding-bottom: 0; min-height: 100px; }
 /* the tab picture is small (288 x 124): it is enlarged to reach towards the middle of the row, which crops a little off its top and bottom */
 .row .art { flex: none; align-self: stretch; width: 420px; min-height: 100px; margin-left: -90px; background: right center / 100%% auto no-repeat; }
@@ -140,7 +142,8 @@ body.ak { width: %dpx; padding: 26px; font-family: var(--ak-cjk); color: var(--a
 .nm b { font-size: 21px; font-weight: 900; }
 .nm small { flex-basis: 100%%; font-size: 15px; color: var(--ak-sub); }
 .nm .ak-tag { flex: none; }
-.dl { flex: none; text-align: right; }
+.dl { flex: none; width: 210px; text-align: right; }
+.dl.long { width: 290px; }
 .dl b { display: block; font-size: 19px; font-weight: 700; }
 .dl b.perm { font-size: 16px; color: var(--ak-sub); font-weight: 400; }
 .dl span { display: inline-block; margin-top: 3px; font-size: 14px; color: var(--ak-sub); }

@@ -149,6 +149,15 @@ def _builds() -> tuple[dict, int]:
     return {"operators": {}, "sets": {}}, 3
 
 
+def _loose_usage(series: dict) -> dict | None:
+    """Who wears pieces of a loose series, from the members' builds kept by endfield_guide."""
+    with contextlib.suppress(Exception):
+        from plugins import endfield_guide
+
+        return endfield_guide.build_store.wearers({p["name"] for p in series["pieces"]}, endfield_guide.echo_store.optout())
+    return None
+
+
 def _partners(operator_id: str) -> dict | None:
     """Teammates of the operator in members' high-difficulty clears, kept by endfield_guide (None without data)."""
     with contextlib.suppress(Exception):
@@ -185,7 +194,8 @@ async def _(state: T_State) -> None:
             stats, min_sample = _builds()
             srcs = await asyncio.gather(*(_cached_image(data.equip_icon_url(p["icon"]), f"eq_{p['icon']}.png") for p in equip_set["pieces"]))
             icons = {p["id"]: src for p, src in zip(equip_set["pieces"], srcs)}
-            html = render.equip_set_html(equip_set, icons, version, stats["sets"].get(equip_set["name"]), min_sample, result.note)
+            usage = _loose_usage(equip_set) if equip_set.get("loose") else stats["sets"].get(equip_set["name"])
+            html = render.equip_set_html(equip_set, icons, version, usage, min_sample, result.note)
         else:
             op = index["operators"][result.id]
             icon = await _cached_image(data.char_icon_url(op["id"]), f"chr_{op['id']}.png")

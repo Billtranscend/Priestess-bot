@@ -70,7 +70,7 @@ TABLES = (
     "ActivityWeeklyTaskTable",
     "ActivityWeeklyTaskMileStoneTable",
 )
-INDEX_SCHEMA = 19  # bump to force a rebuild when the index layout changes (18: leader enemies, 19: logistics skills)
+INDEX_SCHEMA = 20  # bump to force a rebuild when the index layout changes (18: leader enemies, 19: logistics skills, 20: loose equipment)
 # Enemy resistance attribute ids (AttributeShowConfigTable), in the in-game display order.
 ENEMY_RESISTANCES = ((94, "物理"), (98, "灼热"), (97, "电磁"), (96, "寒冷"), (95, "自然"), (99, "超域"))
 TOWER_DIFFICULTIES = {"1": "普通", "2": "困难", "3": "残酷"}
@@ -1084,29 +1084,10 @@ def build_equip_sets(load, text, maps) -> dict:
             continue
         rank = bundle[min(max(rule.get("skillLv", 1), 1), len(bundle)) - 1]
         values = {e["key"].lower(): e["value"] for e in rank.get("blackboard", [])}
-        pieces = []
-        for equip_id in row.get("equipList") or []:
-            equip, item = equips.get(equip_id), items.get(equip_id, {})
-            piece_name = text(item.get("name"))
-            if not equip or not piece_name:
-                continue
-            pieces.append(
-                {
-                    "id": equip_id,
-                    "name": piece_name,
-                    "part": EQUIP_PARTS.get(equip.get("partType"), ""),
-                    "rarity": item.get("rarity", 0),
-                    "level": equip.get("minWearLv", 0),
-                    "icon": item.get("iconId") or equip_id,
-                    "defense": round((equip.get("displayBaseAttrModifier") or {}).get("attrValue", 0)),
-                    "domain": maps["DOMAIN_MAP"].get(equip.get("domainId", ""), ""),
-                    "attrs": _equip_attrs(equip, maps),
-                }
-            )
+        pieces = [p for equip_id in row.get("equipList") or [] if (p := _equip_piece(equip_id, equips, items, text, maps))]
         if not pieces:
             continue
-        order = list(EQUIP_PARTS.values())
-        pieces.sort(key=lambda p: (-p["rarity"], order.index(p["part"]) if p["part"] in order else 9, p["id"]))
+        _sort_pieces(pieces)
         sets[set_id] = {
             "id": set_id,
             "name": name,
@@ -1117,7 +1098,58 @@ def build_equip_sets(load, text, maps) -> dict:
             "domain": pieces[0]["domain"],
             "pieces": pieces,
         }
+    sets.update(build_loose_series(equips, items, text, maps))
     return sets
+
+
+def _equip_piece(equip_id: str, equips: dict, items: dict, text, maps: dict) -> dict | None:
+    equip, item = equips.get(equip_id), items.get(equip_id, {})
+    name = text(item.get("name"))
+    if not equip or not name:
+        return None
+    return {
+        "id": equip_id,
+        "name": name,
+        "part": EQUIP_PARTS.get(equip.get("partType"), ""),
+        "rarity": item.get("rarity", 0),
+        "level": equip.get("minWearLv", 0),
+        "icon": item.get("iconId") or equip_id,
+        "defense": round((equip.get("displayBaseAttrModifier") or {}).get("attrValue", 0)),
+        "domain": maps["DOMAIN_MAP"].get(equip.get("domainId", ""), ""),
+        "attrs": _equip_attrs(equip, maps),
+    }
+
+
+def _sort_pieces(pieces: list[dict]) -> None:
+    order = list(EQUIP_PARTS.values())
+    pieces.sort(key=lambda p: (-p["rarity"], order.index(p["part"]) if p["part"] in order else 9, p["id"]))
+
+
+def build_loose_series(equips: dict, items: dict, text, maps: dict) -> dict:
+    """Loose pieces (no set), grouped by series the way the game's item ids are: item_equip_t4_parts_wuling02_hand_01 -> …_wuling02.
+
+    Each series is stored like a set with `loose: True` and no effect, so /涉渊护手 opens it. Its name is the
+    pieces' most common two-character prefix (涉渊, 纾难, 矿场); a prefix several series share gets their level.
+    """
+    groups: dict[str, list[dict]] = {}
+    for equip_id, equip in equips.items():
+        if not equip.get("suitID") and (piece := _equip_piece(equip_id, equips, items, text, maps)):
+            groups.setdefault(re.sub(r"_[a-z]+_\d+$", "", equip_id), []).append(piece)
+    found = []
+    for series_id, pieces in sorted(groups.items()):
+        _sort_pieces(pieces)
+        prefix = Counter(p["name"][:2] for p in pieces).most_common(1)[0][0]
+        found.append((series_id, prefix, pieces))
+    shared = Counter(prefix for _, prefix, _ in found)
+    series = {}
+    for series_id, prefix, pieces in found:
+        level = max(p["level"] for p in pieces)
+        name = prefix if shared[prefix] == 1 else f"{prefix} Lv{level}"
+        series[f"loose:{series_id}"] = {
+            "id": f"loose:{series_id}", "name": name, "loose": True, "count": 0, "effect": "",
+            "rarity": pieces[0]["rarity"], "level": level, "domain": pieces[0]["domain"], "pieces": pieces,
+        }
+    return series
 
 
 def activity_banner_url(tab: str) -> str:
