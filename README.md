@@ -64,7 +64,7 @@ A QQ group bot for Arknights: Endfield / Arknights communities, built on NoneBot
 ### 通知与群功能
 
 - 活动日历与活动开启通知（两款游戏）：有活动开启时在各群发一张通知图，不 @全体，夜间开启的在早上统一发
-- 群周报（每周日 19:00）：每周任务、本群竞速前三、关卡轮换、活动与卡池倒计时；机器人是管理员的群会 @全体成员
+- 群周报（每周日 19:00）：本周群精华、每周任务、本群竞速前三、关卡轮换、活动与卡池倒计时；可用 `data/weekly_report/config.json` 指定发送的群，@全体成员 由插件里的 `AT_ALL` 开关控制（默认关闭）
 - 理智查询，理智回满时在群内提醒
 - 自动同意入群邀请；可选为新群添加 nonebot-bison 的默认订阅，机器人被移出群后自动移除该群的订阅，见「部署」
 
@@ -322,7 +322,7 @@ NapCat 以反向 WebSocket 客户端连入。动态推送可另外搭配
 | 每 10 分钟 | 检查 AKEData 数据版本，有新版本立即重建并通知各群（不分时段） | `endfield_wiki` |
 | 每 5 分钟 | 检查两款游戏是否有活动开启，有则向所有群发送通知图（0–8 点开启的在 8 点发送） | `game_calendar` |
 | 每 30 分钟 | 检查明日方舟游戏数据版本，每小时查询一次 PRTS Wiki 已登记的活动 | `game_calendar` |
-| 每周日 19:00 | 向所有群发送周报 | `weekly_report` |
+| 每周日 19:00 | 发送周报（默认所有群，`data/weekly_report/config.json` 的 `groups` 可指定） | `weekly_report` |
 | 每周一 04:00 | 森空岛账号体检 | `skland_health` |
 
 ## 目录结构
