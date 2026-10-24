@@ -32,7 +32,9 @@ from .builds import CARD_URL, BuildStore, extract
 WAR_ECHOES_URL = "https://zonai.skland.com/api/v1/game/endfield/card/war-echoes"
 INDIE_HARD_URL = "https://zonai.skland.com/api/v1/game/endfield/card/indie-hard"  # 影拓丰碑
 DIFFICULTY_FIELDS = (("normalDungeon", "普通"), ("hardDungeon", "困难"), ("cruelDungeon", "残酷"))
-REQUEST_GAP = 2.0
+REQUEST_GAP = 2.0  # between one worker's own requests
+WORKERS = 5  # members fetched at the same time; sequential ~10 s per member (67 min for 392), 3 workers ~21 min for 420 with no extra errors
+SAVE_EVERY = 50  # members per partial save of the clears during a run
 ECHO_SCHEMA = 2  # 2: keep the fastest clear when a stage recurs across seasons (1 kept the latest)
 
 
@@ -92,10 +94,11 @@ class EchoStore:
             if data["members"].pop(qq, None) is not None:
                 self._save(data)
 
-    async def collect(self, builds: BuildStore | None = None) -> dict[str, int]:
+    async def collect(self, builds: BuildStore | None = None, clears: bool = True) -> dict[str, int]:
         """Fetch every bound, non-opted-out member once; returns counters for logging.
 
         With `builds`, each member's card is read as well and their operators' equipment is stored there.
+        `clears=False` reads only the cards (members keep the clears of the last run).
         """
         async with self.lock:
             optout = self.optout()
@@ -103,65 +106,89 @@ class EchoStore:
             stats = Counter()
             build_members = builds.load().get("members") or {} if builds else {}
             try:
-                await self._collect_into(data, stats, optout, builds, build_members)
+                await self._collect_into(data, stats, optout, builds, build_members, clears)
             finally:  # also after a failure: members already fetched keep their new records, the others their old ones
-                data["schema"] = ECHO_SCHEMA
-                self._save(data)
+                if clears:
+                    data["schema"] = ECHO_SCHEMA
+                    self._save(data)
                 if builds is not None:  # members dropped above (unbound, opted out, failing) leave the build statistics too
                     builds.save({qq: member for qq, member in build_members.items() if qq in data["members"]})
             return dict(stats)
 
-    async def _collect_into(self, data: dict, stats: Counter, optout: set[str], builds: BuildStore | None, build_members: dict) -> None:
+    async def _collect_into(self, data: dict, stats: Counter, optout: set[str], builds: BuildStore | None, build_members: dict, clears: bool) -> None:
         async with get_session() as session:
-            # Plain values: the per-member commit below expires ORM objects, and lazily
-            # reloading them outside an await raises MissingGreenlet.
             binds = (await session.execute(select(Bind.platform_id, Bind.bind_id).where(Bind.platform == "QQClient"))).all()
-            for done, (qq, bind_id) in enumerate(binds, 1):
-                if done % 20 == 0:
-                    logger.info(f"War Echoes collection progress: {done}/{len(binds)} binds, {dict(stats)}")
-                if qq in optout:
-                    data["members"].pop(qq, None)
-                    continue
-                # One entry per member: their default Endfield role (unbound since the last
-                # run, or no such role: no stale clears on the boards).
-                selected = await default_role(session, bind_id)
-                if selected is None:
-                    stats["dropped"] += data["members"].pop(qq, None) is not None
-                    continue
-                user, char = selected
-                # An API error code drops the member at once; other failures (network, login) get one
-                # retry. Members still failing are dropped so stale clears never stay on the boards.
-                for attempt in range(2):
-                    try:
-                        echoes = await _fetch(WAR_ECHOES_URL, user, char)
-                        records, targets = _extract(echoes["warEchoes"])
-                        await asyncio.sleep(REQUEST_GAP)
-                        monument = await _fetch(INDIE_HARD_URL, user, char)
-                        records.update(_extract_monument(monument["indieHard"]))
-                        if not stats["ok"]:  # the same for every member: one answer per run is enough
-                            self.save_layout(extract_layout(echoes["warEchoes"], monument["indieHard"]))
-                        data["members"][qq] = {"ts": time.time(), "records": records}
-                        data["targets"].update(targets)
-                        stats["ok"] += 1
-                        break
-                    except Exception as e:
-                        if isinstance(e, RecordError) or attempt:
-                            stats[type(e).__name__] += 1
-                            stats["dropped"] += data["members"].pop(qq, None) is not None
-                            break
-                        await asyncio.sleep(REQUEST_GAP * 2)
-                if builds is not None and qq in data["members"]:
-                    try:  # a failure keeps the member's previous snapshot
-                        await asyncio.sleep(REQUEST_GAP)
-                        card = await _fetch(CARD_URL, user, char)
-                        build_members[qq] = {"ts": time.time(), "chars": extract(card.get("detail") or {})}
-                        stats["builds"] += 1
-                    except Exception as e:
-                        stats[f"builds_{type(e).__name__}"] += 1
-                # Persist refreshed tokens now: a write left pending across the whole run would hold
-                # SQLite's write lock for minutes and make binding / gacha updates fail.
-                await _commit(session, stats)
+        queue: asyncio.Queue = asyncio.Queue()
+        for bind in binds:
+            queue.put_nowait(bind)
+        done = 0
+
+        async def worker() -> None:
+            # One session per worker: an AsyncSession must not be shared by concurrent tasks.
+            nonlocal done
+            async with get_session(expire_on_commit=False, autoflush=False) as session:
+                while not queue.empty():
+                    qq, bind_id = queue.get_nowait()
+                    await self._member(session, qq, bind_id, data, stats, optout, builds, build_members, clears)
+                    done += 1
+                    if done % 20 == 0:
+                        logger.info(f"War Echoes collection progress: {done}/{len(binds)} binds, {dict(stats)}")
+                    if clears and done % SAVE_EVERY == 0:  # the boards read the file: show what is new so far
+                        data["schema"] = ECHO_SCHEMA
+                        self._save(data)
+
+        try:
+            async with asyncio.TaskGroup() as group:  # a failing worker stops the others before the final save
+                for _ in range(WORKERS):
+                    group.create_task(worker())
+        except ExceptionGroup as failed:  # callers log the cause's type, as with the sequential loop
+            raise failed.exceptions[0] from None
+
+    async def _member(self, session, qq: str, bind_id: int, data: dict, stats: Counter, optout: set[str], builds: BuildStore | None, build_members: dict, clears: bool) -> None:
+        if qq in optout:
+            data["members"].pop(qq, None)
+            return
+        # One entry per member: their default Endfield role (unbound since the last
+        # run, or no such role: no stale clears on the boards).
+        selected = await default_role(session, bind_id)
+        if selected is None:
+            stats["dropped"] += data["members"].pop(qq, None) is not None
+            return
+        user, char = selected
+        # An API error code drops the member at once; other failures (network, login) get one
+        # retry. Members still failing are dropped so stale clears never stay on the boards.
+        for attempt in range(2 if clears else 0):
+            try:
+                echoes = await _fetch(WAR_ECHOES_URL, user, char)
+                records, targets = _extract(echoes["warEchoes"])
                 await asyncio.sleep(REQUEST_GAP)
+                monument = await _fetch(INDIE_HARD_URL, user, char)
+                records.update(_extract_monument(monument["indieHard"]))
+                if not stats["ok"]:  # the same for every member: one answer per run is enough
+                    self.save_layout(extract_layout(echoes["warEchoes"], monument["indieHard"]))
+                data["members"][qq] = {"ts": time.time(), "records": records}
+                data["targets"].update(targets)
+                stats["ok"] += 1
+                break
+            except Exception as e:
+                if isinstance(e, RecordError) or attempt:
+                    stats[type(e).__name__] += 1
+                    stats["dropped"] += data["members"].pop(qq, None) is not None
+                    break
+                await asyncio.sleep(REQUEST_GAP * 2)
+        if builds is not None and qq in data["members"]:
+            try:  # a failure keeps the member's previous snapshot
+                if clears:
+                    await asyncio.sleep(REQUEST_GAP)
+                card = await _fetch(CARD_URL, user, char)
+                build_members[qq] = {"ts": time.time(), "chars": extract(card.get("detail") or {})}
+                stats["builds"] += 1
+            except Exception as e:
+                stats[f"builds_{type(e).__name__}"] += 1
+        # Persist refreshed tokens now: a write left pending across the whole run would hold
+        # SQLite's write lock for minutes and make binding / gacha updates fail.
+        await _commit(session, stats)
+        await asyncio.sleep(REQUEST_GAP)
 
 
 async def _commit(session, stats: Counter) -> None:

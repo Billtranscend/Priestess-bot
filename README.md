@@ -316,7 +316,8 @@ NapCat 以反向 WebSocket 客户端连入。动态推送可另外搭配
 |---|---|---|
 | 每天 00:15 / 00:20 | 明日方舟 / 终末地自动签到 | nonebot-plugin-skland |
 | 每天 01:00 | 终末地抽卡记录自动同步 | `skland_auto_gacha` |
-| 每天 05:30、17:30 | 收集高难关卡战绩（竞速榜、出场率、通关阵容）；05:30 那次同时收集成员配装 | `endfield_guide` |
+| 每天 03:00 | 收集成员配装（干员卡的群友配装统计） | `endfield_guide` |
+| 每天 05:30、17:30 | 收集高难关卡战绩（竞速榜、出场率、通关阵容）；同时查询的账号数由 `plugins/endfield_guide/echoes.py` 的 `WORKERS` 设置（默认 5），每收完 50 人保存一次，榜单随之陆续更新 | `endfield_guide` |
 | 每天 06:00 | 检查机器人在哪些群是管理员 | `weekly_report` |
 | 每 10 分钟 | 理智回满检查 | `sanity_reminder` |
 | 每 10 分钟 | 检查 AKEData 数据版本，有新版本立即重建并通知各群（不分时段） | `endfield_wiki` |

@@ -436,7 +436,7 @@ async def _(event: MessageEvent, arg: Message = CommandArg()) -> None:
 
 @collect_now.handle()
 async def _() -> None:
-    await collect_now.send("开始收集战争回响通关记录和干员配装，约需半小时…")
+    await collect_now.send("开始收集战争回响通关记录和干员配装，约需半小时（期间榜单会陆续更新）…")
     stats = await echo_store.collect(build_store)
     await collect_now.finish(f"收集完成：{stats}")
 
@@ -609,7 +609,7 @@ async def _render(endgame, group, stage, difficulty, clears, target_text, videos
     if not is_tower and difficulty == "苦难":
         extra += _box("镀层", '<div class="desc dim">通关该系列苦难模式的全部关卡后，即可为该系列蚀刻章镀层</div>')
 
-    team_block = _box("本群通关阵容", '<div class="desc dim">暂无群友的通关记录（绑定森空岛后，数据每天 05:30、17:30 更新）</div>')
+    team_block = _box("本群通关阵容", '<div class="desc dim">暂无群友的通关记录（绑定森空岛后，数据每天 05:30、17:30 起陆续更新）</div>')
     if clears and clears["teams"]:
         rows = []
         for i, team in enumerate(clears["teams"], 1):
@@ -624,7 +624,7 @@ async def _render(endgame, group, stage, difficulty, clears, target_text, videos
         scope = "本群" if in_group else "你"
         team_block = _box(
             f"{scope}通关阵容",
-            f'{"".join(rows)}<div class="note">等级 / 潜能为使用该阵容群友的平均值；数据每天 05:30、17:30 更新，不含武器与装备</div>',
+            f'{"".join(rows)}<div class="note">等级 / 潜能为使用该阵容群友的平均值；数据每天 05:30、17:30 起陆续更新，不含武器与装备</div>',
             f'{clears["clears"]} 人通关{difficulty}' + (f'，{clears["plus"]} 人增辉' if difficulty == "残酷" else ""),
         )
 
@@ -719,7 +719,7 @@ td.ct { width: 84px; text-align: right; color: var(--ef-sub); font-size: 15px; w
 
 BOARD_WIDTH = 1000
 ENDMIN_IDS = {"chr_0003_endminf": "chr_0002_endminm", "chr_9000_endmin": "chr_0002_endminm"}
-BOARD_FOOT = "用时与阵容来自森空岛最佳记录，精确到秒；阵容数字为 等级·潜能。数据每天 05:30、17:30 更新<br>不想上榜可发 /攻略统计 退出"
+BOARD_FOOT = "用时与阵容来自森空岛最佳记录，精确到秒；阵容数字为 等级·潜能。数据每天 05:30、17:30 起陆续更新<br>不想上榜可发 /攻略统计 退出"
 
 
 def _rank(n: int) -> str:
@@ -930,7 +930,7 @@ async def _(bot: Bot, event: MessageEvent, arg: Message = CommandArg()) -> None:
                     f'<td class="pc">{n / total * 100:.1f}%</td><td class="ct">{n} 次</td></tr>'
                 )
             body = f'<div class="ef-sec"><h3>{escape(scope)}<small class="cjk">{len(pool & players)} 位玩家 · 共 {total} 条通关记录</small></h3><table>{"".join(rows)}</table></div>'
-        foot = "出场率 = 带该干员的通关记录数 ÷ 通关记录总数（每条记录为一位玩家在一关的最快编队）<br>数据每天 05:30、17:30 更新；不想参与统计可发 /攻略统计 退出"
+        foot = "出场率 = 带该干员的通关记录数 ÷ 通关记录总数（每条记录为一位玩家在一关的最快编队）<br>数据每天 05:30、17:30 起陆续更新；不想参与统计可发 /攻略统计 退出"
         image = await _board_page("终末地 · <em>榜单角色出场率</em>", "全部绑定玩家（不分群）高难关卡最快编队中各干员的使用比例", body, foot, "Endfield · Usage Rate")
         await UniMessage.image(raw=image).send()
     except MatcherException:
@@ -947,15 +947,26 @@ async def _(bot: Bot, event: MessageEvent, arg: Message = CommandArg()) -> None:
 
 @scheduler.scheduled_job("cron", hour="5,17", minute=30, timezone="Asia/Shanghai", id="endfield_guide_collect")
 async def _collect() -> None:
-    """Clears twice a day; operators' equipment only with the morning run (or when there is none yet, or it is outdated)."""
+    """Clears twice a day; operators' equipment has its own night run (here only when there is none yet, or it is outdated)."""
     started = time.time()
-    with_builds = datetime.now(timezone(timedelta(hours=8))).hour < 12 or not build_store.current()
+    with_builds = not build_store.current()
     try:
         stats = await echo_store.collect(build_store if with_builds else None)
         logger.info(f"War Echoes clears collected in {time.time() - started:.0f}s: {stats}")
     except Exception as e:
         logger.warning(f"War Echoes collection failed: {type(e).__name__}")
     await _warm_covers()
+
+
+@scheduler.scheduled_job("cron", hour=3, minute=0, timezone="Asia/Shanghai", id="endfield_guide_builds")
+async def _collect_builds() -> None:
+    """Operators' equipment once a night, apart from the clears so the 05:30 boards are not held up by it."""
+    started = time.time()
+    try:
+        stats = await echo_store.collect(build_store, clears=False)
+        logger.info(f"Operator builds collected in {time.time() - started:.0f}s: {stats}")
+    except Exception as e:
+        logger.warning(f"Operator builds collection failed: {type(e).__name__}")
 
 
 async def _warm_covers() -> None:
