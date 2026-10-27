@@ -68,9 +68,6 @@ CUSTOM_SHORTCUTS = (
     *_query(r"(明日方舟|方舟|mrfz)签到详情", "skland arksign status"),
     ShortcutSpec(r"(明日方舟|方舟|mrfz)签到", "skland arksign sign --all"),
     *_query(r"(明日方舟|方舟|mrfz)抽卡记录", "skland gacha"),
-    *_query(r"(明日方舟|方舟|mrfz)卡片", "skland"),
-    *_query(r"(明日方舟|方舟|mrfz)查询", "skland"),
-    *_query(r"(明日方舟|方舟|mrfz)开盒", "skland"),
 )
 
 if any(not spec.prefix for spec in CUSTOM_SHORTCUTS):
@@ -100,6 +97,13 @@ RETIRED_SHORTCUTS = (
     r"(终末地|zmd|ef)查询" + ROLE,
     r"(终末地|zmd|ef)开盒 all",
     r"(终末地|zmd|ef)开盒",
+    # 2026-10-27: /mrfz开盒 (with 卡片, 查询) is plugins.arknights_roster now.
+    r"(明日方舟|方舟|mrfz)卡片",
+    r"(明日方舟|方舟|mrfz)卡片" + ROLE,
+    r"(明日方舟|方舟|mrfz)查询",
+    r"(明日方舟|方舟|mrfz)查询" + ROLE,
+    r"(明日方舟|方舟|mrfz)开盒",
+    r"(明日方舟|方舟|mrfz)开盒" + ROLE,
 )
 
 _SHORTCUT_EXTENSION_ID = "builtins.extensions.shortcut:SuperUserShortcutExtension"

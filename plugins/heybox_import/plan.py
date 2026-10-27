@@ -264,7 +264,9 @@ def build_plan(result: dict, uid: str, official: list[Official], pool_windows: d
                 plan.error = "小黑盒返回的记录里出现了其他 UID，已拒绝导入"
                 plan.rows, plan.pools = [], []
                 return plan
-            if not (pool_id.lower().startswith(SUPPORTED_PREFIXES) or pool_id in SUPPORTED_IDS):
+            if pool_id.lower().startswith("rerun"):  # 重构寻访 (1.6): recent enough that the official records are complete
+                outcome.skipped = "重构寻访，官方记录已完整同步，无需导入"
+            elif not (pool_id.lower().startswith(SUPPORTED_PREFIXES) or pool_id in SUPPORTED_IDS):
                 outcome.skipped = "暂不支持的卡池类型"
             else:
                 seq = _snapshot_seq(result, pool_id, weapon)

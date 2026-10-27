@@ -59,7 +59,8 @@ A QQ group bot for Arknights: Endfield / Arknights communities, built on NoneBot
 
 ### 明日方舟
 
-- 角色卡、抽卡记录、干员一览、集成战略战绩，由上游插件提供
+- 明日方舟角色卡（开盒）：账号概况、助战、基建和全部干员的练度，明日方舟自己的界面风格
+- 抽卡记录、干员一览、集成战略战绩，由上游插件提供
 
 ### 通知与群功能
 
@@ -223,6 +224,8 @@ NapCat 以反向 WebSocket 客户端连入。动态推送可另外搭配
 - 本仓库自己的页面（资料卡、攻略、榜单、周报、欧非榜、帮助图）：`plugins/ef_theme/__init__.py` 的
   `PAGE_SCALE` 与 `PAGE_QUALITY`；
 - `/zmd开盒`：`plugins/endfield_roster/__init__.py` 顶部的 `SCALE` 与 `QUALITY`，文件内注释给出了各档的实测大小；
+- `/mrfz开盒`：`plugins/arknights_roster/__init__.py` 顶部的 `SCALE`、`QUALITY`，干员多于 `DENSE_FROM` 时改用
+  `DENSE_SCALE`、`DENSE_QUALITY` 的紧凑排版；
 - 上游 nonebot-plugin-skland 渲染的全部图片（抽卡记录、明日方舟卡片等）：
   `plugins/skland_compact_images/__init__.py` 的 `QUALITY`，以及超长页面的缩放阈值。
 
@@ -240,7 +243,7 @@ NapCat 以反向 WebSocket 客户端连入。动态推送可另外搭配
 | `/skl角色更新` | 刷新已绑定的游戏角色 | |
 | `/skl角色` | 查看已绑定的账号、角色和序号 | 标有「插件默认」的是指令默认使用的角色 |
 | `/skl切换终末地角色 序号` | 更换默认角色 | 方舟用 `/skl切换方舟角色 序号` |
-| `指令 -r 序号` | 临时查看另一个角色 | 如 `/zmd抽卡记录 -r 2`、`/zmd开盒 -r 2`、`/mrfz卡片 -r 2` |
+| `指令 -r 序号` | 临时查看另一个角色 | 如 `/zmd抽卡记录 -r 2`、`/zmd开盒 -r 2`、`/mrfz开盒 -r 2` |
 | `/skl解绑` | 解绑并删除角色与抽卡记录 | 先选账号序号或「全部」，再回复「确认」 |
 
 ### 终末地
@@ -294,7 +297,8 @@ NapCat 以反向 WebSocket 客户端连入。动态推送可另外搭配
 
 | 指令 | 作用 |
 |---|---|
-| `/mrfz卡片`、`/mrfz签到`、`/mrfz签到详情`、`/mrfz抽卡记录` | 明日方舟角色卡、签到与抽卡记录 |
+| `/mrfz开盒 [@用户]` | 明日方舟角色卡：账号概况、助战、基建和全部干员的练度（别名 `/mrfz卡片`、`/mrfz查询`） |
+| `/mrfz签到`、`/mrfz签到详情`、`/mrfz抽卡记录` | 明日方舟签到与抽卡记录 |
 | `/方舟干员 [筛选词]` | 干员一览 |
 | `/树海肉鸽` 等 | 集成战略战绩 |
 | `/理智` | 查看方舟与终末地当前理智 |
@@ -344,9 +348,11 @@ deploy/
   bison-subscribe.*.example    触发上述脚本的 systemd 单元示例
 plugins/
   ef_theme/                    共享的终末地风格样式与字体
+  ark_theme/                   共享的明日方舟风格样式
   endfield_wiki/               终末地资料库（AKEData 同步、检索、资料卡）
   endfield_guide/              高难关卡攻略、竞速榜、出场率
   endfield_roster/             终末地角色卡（/zmd开盒）
+  arknights_roster/            明日方舟角色卡（/mrfz开盒）
   skland_gacha_rank/           欧非榜
   heybox_import/               从小黑盒导入早期抽卡记录
   weekly_report/               群周报

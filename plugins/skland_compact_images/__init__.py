@@ -8,13 +8,18 @@ reports) and are scaled down a little beyond a height limit.
 
 A screenshot waits for every image of the page; when an outside image host is slow the page times out
 after 30 s and the member used to get no answer at all (2026-10-19, /mrfz开盒). A timed-out render is
-now tried once more, and if that also times out the member is told so before the command ends.
+now tried once more, and if that also times out the member is told so (once per command) before it ends.
+
+Renders also wait for one of RENDER_SLOTS: upstream draws the pages of a roster side by side, and four
+/方舟干员 sent within a minute (2026-10-26 23:20) put a dozen portrait pages on the CPU at once; all of
+them timed out, and so did their retries.
 """
 import asyncio
 import contextlib
 import functools
 import hashlib
 import inspect
+import weakref
 from io import BytesIO
 from pathlib import Path
 
@@ -35,6 +40,7 @@ WEBP_MAX_SIDE = 16383  # format limit
 RENDER_TRIES = 2  # a render that times out (slow outside image host) is tried once more
 TIMEOUT_TEXT = "生成图片超时（图片素材加载太慢），请稍后再试"
 REACTION_FAIL = "10060"
+RENDER_SLOTS = 3  # pages rendered at the same time, across all commands; the others wait their turn
 _expected = "71cb72802aa29d8fc6abc9a9de7e0f37d0d3dfa856e6d865a44204c52f0a48d0"  # render.py of 0.7.2
 if hashlib.sha256(Path(render.__file__).read_bytes()).hexdigest() != _expected:
     raise RuntimeError("Skland compact images requires re-audit of renderer")
@@ -42,6 +48,8 @@ _original = render.template_to_pic
 _signature = inspect.signature(_original)
 if getattr(_original, "_compact_images", False):
     raise RuntimeError("Skland compact images already installed")
+_slots = asyncio.Semaphore(RENDER_SLOTS)
+_told = weakref.WeakSet()  # matchers whose member already got TIMEOUT_TEXT
 
 
 @functools.wraps(_original)
@@ -51,7 +59,8 @@ async def compact_template_to_pic(*args, **kwargs):
     bound.arguments["quality"] = None
     for attempt in range(RENDER_TRIES):
         try:
-            data = await _original(*bound.args, **bound.kwargs)
+            async with _slots:  # waiting here does not count towards the page timeout
+                data = await _original(*bound.args, **bound.kwargs)
             break
         except PageTimeout:
             if attempt < RENDER_TRIES - 1:
@@ -64,9 +73,11 @@ async def compact_template_to_pic(*args, **kwargs):
 
 
 async def _tell_timeout() -> None:
-    """Inside a command, say why no picture comes (the command still ends with the error)."""
-    if current_matcher.get(None) is None:
+    """Inside a command, say why no picture comes (the command still ends with the error); once per command."""
+    matcher = current_matcher.get(None)
+    if matcher is None or matcher in _told:
         return
+    _told.add(matcher)
     from nonebot_plugin_alconna import UniMessage, message_reaction
 
     with contextlib.suppress(Exception):
