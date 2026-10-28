@@ -19,6 +19,7 @@ from pathlib import Path
 from nonebot import logger, on_command, require
 from nonebot.adapters import Message
 from nonebot.adapters.onebot.v11 import MessageEvent
+from nonebot.adapters.onebot.v11.exception import ActionFailed
 from nonebot.consts import PREFIX_KEY, RAW_CMD_KEY
 from nonebot.params import CommandArg
 from nonebot.exception import MatcherException
@@ -58,9 +59,15 @@ WIDTH = 1320
 #   SCALE 1 -> 1320 px, ~280 KB;  1.25 -> 1650 px, ~380 KB;  1.5 -> 1980 px, ~470 KB (QUALITY 55).
 # A JPEG as sharp as the 1.5x WebP was 1.2 MB. Upload to QQ runs at 150-230 KB/s by day but only
 # ~15-20 KB/s in the evening, so the size decides the wait: fetch 2-4.5 s + render ~3.5 s + size / speed.
-SCALE = 1.5
+SCALE = 1.25  # 2026-10-28: a 1.5x card did not finish uploading within NapCat's 60 s in the evening
 QUALITY = 55
 REACTION_PROCESSING, REACTION_DONE, REACTION_FAIL = "66", "144", "10060"
+SLOW_UPLOAD = "图片上传较慢，可能会晚一点出现；如果一直没有出现，请过几分钟再发一次"
+
+
+def _upload_timed_out(e: Exception) -> bool:
+    """NapCat gave up waiting for QQ to take the picture (retcode 1200); QQ often still delivers it later."""
+    return isinstance(e, ActionFailed) and (e.info.get("retcode") == 1200 or "timeout" in str(e).lower())
 ROLE = re.compile(r"(?:-r|--role)\s*(\d+)")
 CONTROL_CENTER = 0  # spaceShip room type of 总控中枢
 RES_IMAGES = Path(nonebot_plugin_skland.__file__).parent / "resources" / "images" / "endfield"
@@ -415,7 +422,10 @@ async def _(event: MessageEvent, user_session: UserSession, session: async_scope
     except MatcherException:
         raise
     except Exception as e:
-        logger.warning(f"Endfield roster failed: {type(e).__name__}")
+        if _upload_timed_out(e):  # the picture was made; only the upload ran long
+            logger.warning(f"Endfield roster: picture upload timed out")
+            await roster.finish(SLOW_UPLOAD)
+        logger.opt(exception=e).warning(f"Endfield roster failed: {type(e).__name__}")
         await _react(REACTION_FAIL)
         await roster.finish("角色卡生成失败，请稍后再试")
     await _react(REACTION_DONE)

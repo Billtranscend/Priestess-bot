@@ -25,6 +25,7 @@ import httpx
 from nonebot import logger, on_command, require
 from nonebot.adapters import Message
 from nonebot.adapters.onebot.v11 import MessageEvent
+from nonebot.adapters.onebot.v11.exception import ActionFailed
 from nonebot.consts import PREFIX_KEY, RAW_CMD_KEY
 from nonebot.exception import MatcherException
 from nonebot.params import CommandArg
@@ -69,6 +70,12 @@ DENSE_FROM = 200  # operators
 DENSE_SCALE = 1.0
 DENSE_QUALITY = 50
 REACTION_PROCESSING, REACTION_DONE, REACTION_FAIL = "66", "144", "10060"
+SLOW_UPLOAD = "图片上传较慢，可能会晚一点出现；如果一直没有出现，请过几分钟再发一次"
+
+
+def _upload_timed_out(e: Exception) -> bool:
+    """NapCat gave up waiting for QQ to take the picture (retcode 1200); QQ often still delivers it later."""
+    return isinstance(e, ActionFailed) and (e.info.get("retcode") == 1200 or "timeout" in str(e).lower())
 ROLE = re.compile(r"(?:-r|--role)\s*(\d+)")
 RES = Path(nonebot_plugin_skland.__file__).parent / "resources" / "images"
 CACHE = store.get_cache_dir("nonebot_plugin_skland")
@@ -425,7 +432,10 @@ async def _(event: MessageEvent, user_session: UserSession, session: async_scope
     except MatcherException:
         raise
     except Exception as e:
-        logger.warning(f"Arknights roster failed: {type(e).__name__}")
+        if _upload_timed_out(e):  # the picture was made; only the upload ran long
+            logger.warning(f"Arknights roster: picture upload timed out")
+            await roster.finish(SLOW_UPLOAD)
+        logger.opt(exception=e).warning(f"Arknights roster failed: {type(e).__name__}")
         await _react(REACTION_FAIL)
         await roster.finish("角色卡生成失败，请稍后再试")
     await _react(REACTION_DONE)
