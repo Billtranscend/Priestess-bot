@@ -3,9 +3,10 @@
 /zmd欧非榜 shows the ten luckiest and ten unluckiest members for the limited character pools and for the
 weapon pools; /角色欧非榜 and /武器欧非榜 list everyone on one of the two boards.
 
-Stats reuse Skland's own grouping and averaging (group_ef_gacha_records), so the
-numbers match /zmd抽卡记录. Only members of the current group who have bound
-Skland and have not opted out are ranked.
+Stats reuse Skland's own grouping (group_ef_gacha_records) and the UP counting of /zmd抽卡记录
+(plugins/skland_limited.py: 限定寻访, 辉光庆典 and 重构寻访, every limited operator an UP), so the
+numbers match /zmd抽卡记录. Only members of the current group who have bound Skland and have not
+opted out are ranked.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from nonebot.exception import MatcherException
 from nonebot.params import CommandArg
 from nonebot.plugin import PluginMetadata
 
-from plugins import ef_theme
+from plugins import ef_theme, skland_limited
 from plugins.strict_command import strict
 
 require("nonebot_plugin_skland")
@@ -100,7 +101,7 @@ CHARACTERS = Board(
     pool="角色池",
     command="/角色欧非榜",
     english="Operator",
-    basis="限定池「平均多少抽出一个 UP 干员」",
+    basis="限定池（含庆典、重构寻访）「平均多少抽出一个限定干员」",
     target="一个 UP 干员",
     measure="个",
     empty="本群还没有可统计的终末地限定池抽卡记录",
@@ -171,18 +172,20 @@ async def _collect(bot: Bot, group_id: int) -> list[Entry]:
     entries = []
     for uid, user_records in by_user.items():
         stats = group_ef_gacha_records(user_records)
-        # Same UP lookup as /zmd抽卡记录; pools missing from the local table count every 6★ as off-banner.
-        for pool in stats.special_pools + stats.joint_pools + stats.weapon_pools:
+        # Same UP lookup as /zmd抽卡记录; a weapon pool missing from the local table counts every 6★ as off-banner.
+        for pool in stats.weapon_pools:
             if local_pool := ef_gacha_pool_data.get_pool(pool.pool_id):
                 pool.up_six_chars = local_pool.up_six_char_ids
+        special, others = skland_limited.split(stats)
+        skland_limited.mark(special + others)
         qq = qq_by_skuser[uid]
         entries.append(
             Entry(
                 qq=qq,
                 name=names[qq],
-                up_avg=stats.special_up_avg,
-                up_count=stats.special_up_count,
-                special_pulls=sum(p.paid_pulls for p in stats.special_pools),
+                up_avg=skland_limited.up_avg(special, others),
+                up_count=skland_limited.up_count(special + others),
+                special_pulls=sum(p.paid_pulls for p in special + others),
                 weapon_avg=stats.weapon_up_avg,
                 weapon_up=stats.weapon_up_count,
             )

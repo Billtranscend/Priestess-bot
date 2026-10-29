@@ -4,7 +4,8 @@
 {% set stats = namespace(pity_count=0, five_stars=[], paid=0) %}
 {# 累计抽数赠送（信物 / 武库箱 / UP 武器等）：{第 N 个付费抽: [赠品]}，由 skland_ef_theme 注入 #}
 {% set pool_gifts = (gifts or {}).get(pool.pool_id, {}) %}
-{% set show_spook = pool.show_spook_stats %}
+{# 辉光庆典、重构寻访也按 UP / 歪 统计（plugins/skland_limited.py） #}
+{% set show_spook = pool.show_spook_stats or (pool.up_six_chars and (pool.pool_id | lower).startswith(('joint', 'rerun'))) %}
 
 <div class="pool">
     {# 卡池头部 #}

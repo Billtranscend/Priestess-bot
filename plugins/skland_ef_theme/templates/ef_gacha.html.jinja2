@@ -266,7 +266,7 @@ img { display: block; }
                 {# 限定池统计 #}
                 <div class="stat">
                     <h4>限定池</h4>
-                    <div class="big">{{ record.special_pools | sum(attribute='paid_pulls') }}<small>抽</small>{% if record.special_pools | sum(attribute='free_pulls') %}<em>另 免费{{ record.special_pools | sum(attribute='free_pulls') }}</em>{% endif %}</div>
+                    <div class="big">{{ record.limited_pools | sum(attribute='paid_pulls') }}<small>抽</small>{% if record.limited_pools | sum(attribute='free_pulls') %}<em>另 免费{{ record.limited_pools | sum(attribute='free_pulls') }}</em>{% endif %}</div>
                     <div class="kv">
                         <div>
                             <b><span class="six">{{ record.special_total_six }}</span><i>/</i><span class="spook">{{ record.special_total_spook }}</span></b>

@@ -14,8 +14,12 @@ One picture holds one kind of pool:
   限定池 and 武器池   each its own picture, one column of pools while that fits; too tall, the
                       pools go into two columns, then three, and after that into further
                       pictures (限定池 1/2, 2/2 ...);
-  其他卡池            常驻池 (with the one-off 新手池 under it), 联合寻访, 重构寻访 and whatever
-                      kind comes later, one column per kind, three columns to a picture.
+  其他卡池            常驻池 (with the one-off 新手池 under it) and whatever kind comes later,
+                      one column per kind, three columns to a picture.
+
+限定池 holds every pool that can give limited operators: 限定寻访, 辉光庆典 (联合寻访) and 重构寻访, newest
+first, and every limited operator pulled in them is an UP (plugins/skland_limited.py), in the pool
+cards and in the 限定池 figures alike.
 
 重构寻访 (rerun banners, pool ids "rerun_chr_...") is a pool type upstream neither fetches nor
 knows as a category: /zmd抽卡记录更新 fetches it here after upstream's own sync, and the grouped
@@ -66,7 +70,7 @@ from nonebot_plugin_user import UserSession, get_user
 from sqlalchemy import update as sql_update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from plugins import ef_theme
+from plugins import ef_theme, skland_limited
 from plugins.skland_pools import RERUN
 
 LOCAL_DIR = Path(__file__).with_name("templates")
@@ -79,7 +83,7 @@ SCALE = {1: 2.5, 2: 2.0, 3: 1.5}
 # members with many pools have been about this tall for weeks and reach QQ fine.
 MAX_HEIGHT_PX = 15000
 # Columns of the 其他卡池 picture, each a list of (kind, title) stacked in it; a kind not named here gets a column under its pool name.
-OTHER_COLUMNS = ((("standard", "常驻池"), ("beginner", "新手池")), (("joint", "联合寻访"),), (("rerun", "重构寻访"),))
+OTHER_COLUMNS = ((("standard", "常驻池"), ("beginner", "新手池")),)
 CN = timezone(timedelta(hours=8))
 SEVERAL_PICTURES = "抽卡记录将按卡池类型分成多张图片发送"  # plugins.forward_reply_owner recognises this line
 NO_RECORDS = "暂无抽卡记录，请先发送 /zmd抽卡记录更新 拉取数据"
@@ -143,6 +147,32 @@ class Record(EfGroupedGachaRecord):
     def char_total_pulls(self) -> int:
         return super().char_total_pulls + sum(pool.total_pulls for pool in self.rerun_pools)
 
+    # 限定池 figures: 限定寻访, 辉光庆典 and 重构寻访 together; the shared 小保底 stays upstream's (限定寻访 only)
+
+    @property
+    def limited_pools(self) -> list[EfGachaPoolInfo]:
+        return sorted(self.special_pools + self.joint_pools + self.rerun_pools, key=_newest, reverse=True)
+
+    @property
+    def special_total_six(self) -> int:
+        return sum(pool.total_six_stars for pool in self.limited_pools)
+
+    @property
+    def special_total_spook(self) -> int:
+        return sum(pool.total_six_spook for pool in self.limited_pools)
+
+    @property
+    def special_up_count(self) -> int:
+        return skland_limited.up_count(self.limited_pools)
+
+    @property
+    def special_up_avg(self) -> float:
+        return skland_limited.up_avg(self.special_pools, self.joint_pools + self.rerun_pools)
+
+
+def _newest(pool) -> int:
+    return max((group.gacha_ts for group in pool.records), default=0)
+
 
 def regroup(grouped: EfGroupedGachaRecord) -> Record:
     """Take the rerun pools out of 常驻池: character ones into their own list, the weapon one to the weapon pools."""
@@ -150,8 +180,7 @@ def regroup(grouped: EfGroupedGachaRecord) -> Record:
     rerun = [pool for pool in lists["standard_pools"] if pool.pool_id.lower().startswith("rerun")]
     lists["standard_pools"] = [pool for pool in lists["standard_pools"] if pool not in rerun]
     lists["weapon_pools"] += [pool for pool in rerun if pool.pool_type == "weapon"]
-    newest = lambda pool: max((group.gacha_ts for group in pool.records), default=0)  # noqa: E731
-    return Record(**lists, rerun_pools=sorted((pool for pool in rerun if pool.pool_type != "weapon"), key=newest, reverse=True))
+    return Record(**lists, rerun_pools=sorted((pool for pool in rerun if pool.pool_type != "weapon"), key=_newest, reverse=True))
 
 
 async def sync_rerun(session, *, character_id: int, uid: str, server_id: str, access_token: str) -> int:
@@ -218,10 +247,10 @@ class Sheet:
 
 
 def _kind(pool) -> str:
-    """Weapons by what was pulled, rerun banners by their id; upstream's category for the rest."""
+    """Weapons by what was pulled, every pool with limited operators as 限定池; upstream's category for the rest."""
     if pool.pool_type == "weapon":
         return "weapon"
-    return "rerun" if pool.pool_id.lower().startswith("rerun") else pool.pool_category
+    return "special" if skland_limited.is_limited(pool) else pool.pool_category
 
 
 def _split(heights: list[float], columns: int) -> list[list[int]]:
@@ -318,6 +347,8 @@ async def plan(record, *, begin: int | None = None, limit: int | None = None, **
     by_kind: dict[str, list] = {}
     for pool in record.all_pools:
         by_kind.setdefault(_kind(pool), []).append(pool)
+    if "special" in by_kind:  # 限定寻访, 辉光庆典 and 重构寻访 come from three lists
+        by_kind["special"].sort(key=_newest, reverse=True)
     if begin is not None or limit is not None:  # -b / -l still count pools per kind
         by_kind = {kind: pools[begin or 0 : limit] for kind, pools in by_kind.items()}
     sheets: list[Sheet] = []
@@ -462,6 +493,7 @@ async def ef_gacha_history_handler(
         await UniMessage.text("已拉取，暂时没有抽卡记录" if update else NO_RECORDS).send(reply_to=True)
         return
     await _pool_marks(gacha_data, server_id)
+    skland_limited.mark(gacha_data.limited_pools)
 
     @refresh_credentials
     async def profile(state: CredentialState):
