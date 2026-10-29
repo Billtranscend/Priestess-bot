@@ -52,7 +52,7 @@ __plugin_meta__ = PluginMetadata(
 
 PLATFORM = "QQClient"
 TOP = 10  # rows of each lucky / unlucky table on the overview
-MIN_UP = 2  # fewer UPs than this is too small a sample to rank
+MIN_UP = 4  # fewer UPs than this is too small a sample to rank (2 let a lucky or unlucky pair top the board)
 WIDTH = 1000
 FULL_COLUMNS = 3  # the full boards read down each column
 REACTION_PROCESSING, REACTION_DONE, REACTION_FAIL = "66", "144", "10060"
