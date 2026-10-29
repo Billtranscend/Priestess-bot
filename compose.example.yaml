@@ -12,6 +12,11 @@ services:
     container_name: napcat
     network_mode: host
     restart: unless-stopped
+    logging:  # NapCat prints every message it receives; cap what docker keeps
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "2"
     environment:
       NAPCAT_UID: "1000"
       NAPCAT_GID: "1000"

@@ -19,6 +19,8 @@ SERVICE = "nonebot.service"
 # Alconna commands (all of nonebot-plugin-skland) are announced as "AlconnaMatcherMeta(...)" but finish as "AlconnaMatcher(...)".
 STARTED = re.compile(r"Event will be handled by (\w*Matcher)(?:Meta)?(\(.*?\))\s*$")
 # "running is cancelled": a run preprocessor refused the command (e.g. the binding guard).
+# The progress line is shared by the clears collection and the builds-only one, which end differently.
+COLLECTION_ENDS = ("War Echoes clears collected", "War Echoes collection failed", "Operator builds collected", "Operator builds collection failed")
 FINISHED = re.compile(r"(?:Running )?(\w*Matcher\(.*?\)) (?:running complete|running is cancelled|failed\.?)\s*$")
 
 
@@ -43,7 +45,7 @@ def busy(lines: list[str]) -> list[str]:
                 running[match.group(1)] -= 1
         elif "War Echoes collection progress" in line:
             collecting = True
-        elif "War Echoes clears collected" in line or "War Echoes collection failed" in line:
+        elif any(end in line for end in COLLECTION_ENDS):
             collecting = False
     reasons = [f"{name} x{count}" for name, count in running.items() if count > 0]
     if collecting:

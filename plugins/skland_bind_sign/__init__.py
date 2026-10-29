@@ -11,6 +11,11 @@ role list on every binding; this project keeps the flow its members know and add
                  -> reply 「确认」 (upstream's confirmation). `skland qrcode --add` underneath.
                  A member with nothing bound yet is pointed to /skl绑定 and gets no QR code.
 
+Binding by token (/skltoken绑定, upstream's `skland bind`) is closed: a token pasted into a chat is a
+full login, and members pasted it into groups. The command only answers with the way to scan; a
+message that carried a token in a group is recalled when the bot is an admin there, otherwise the
+member is asked to recall it.
+
 Rules kept from before, because the QR code is posted in the group and Skland cannot tell who
 scanned it:
   - a Skland account belongs to one QQ only;
@@ -33,11 +38,12 @@ import asyncio
 import contextlib
 import functools
 import json
+import re
 import time
 from collections import Counter
 from contextvars import ContextVar
 
-from nonebot import get_bots, get_driver, logger, require
+from nonebot import get_bots, get_driver, logger, on_message, require
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent, MessageSegment
 from nonebot.exception import IgnoredException, MockApiException
 from nonebot.matcher import Matcher, current_event, current_matcher
@@ -245,6 +251,9 @@ OTHER_ACCOUNT = "扫码的森空岛账号和你已绑定的不是同一个，绑
 NO_ROLES = "这个森空岛账号下没有可绑定的明日方舟或终末地角色，没有保存"
 CHANGED = "绑定数据在这期间发生了变化，没有保存，请重新发送指令"
 IDENTITY_FAILED = "现有账号的身份校验失败，请先发送 /skl角色更新，或用 /skl解绑 移除异常的账号"
+TOKEN_CLOSED = "Token 绑定已关闭，请发送 /skl绑定 扫码绑定"
+TOKEN_RECALLED = "刚才那条带凭据的消息已撤回"
+TOKEN_RECALL_YOURSELF = "请马上撤回刚才那条消息：凭据等同于账号登录，被别人拿到就能登录你的森空岛"
 
 
 async def _gacha_login_expired(user: SkUser) -> bool:
@@ -314,6 +323,50 @@ async def _no_qrcode_when_bound(matcher: Matcher, bot: Bot, event: MessageEvent,
         return
     await bot.send(event, MessageSegment.at(event.get_user_id()) + " " + ALREADY_BOUND if isinstance(event, GroupMessageEvent) else ALREADY_BOUND)
     raise IgnoredException("already bound to Skland")
+
+
+# Ahead of upstream's matcher (priority 1): `skland bind` without a token would otherwise open
+# Alconna's completion prompt, and the token typed into it would land in the group all the same.
+TOKEN_COMMAND = re.compile(r"^\s*/\s*(?:(?:森空岛|skl|skd)\s*token\s*绑定|(?:skland|sk)\s+bind(?=\s|$))(.*)", re.I | re.S)
+
+
+async def _refuse_token(bot: Bot, event: MessageEvent, carried_token: bool) -> None:
+    if not isinstance(event, GroupMessageEvent):
+        await bot.send(event, TOKEN_CLOSED)
+        return
+    reply = TOKEN_CLOSED
+    if carried_token:
+        try:
+            await bot.delete_msg(message_id=event.message_id)
+            reply += "\n" + TOKEN_RECALLED
+        except Exception:  # not an admin in this group
+            reply += "\n" + TOKEN_RECALL_YOURSELF
+    await bot.send(event, MessageSegment.at(event.get_user_id()) + " " + reply)
+
+
+async def _is_token_command(event: MessageEvent, state: T_State) -> bool:
+    match = TOKEN_COMMAND.match(event.get_plaintext())
+    if match:
+        state["carried_token"] = bool(match.group(1).strip())
+    return bool(match)
+
+
+token_binding = on_message(rule=_is_token_command, priority=0, block=True)
+
+
+@token_binding.handle()
+async def _(bot: Bot, event: MessageEvent, state: T_State) -> None:
+    await _refuse_token(bot, event, state["carried_token"])
+
+
+@run_preprocessor
+async def _no_token_binding(matcher: Matcher, bot: Bot, event: MessageEvent, state: T_State) -> None:
+    """Any other spelling that still reaches upstream's `skland bind` is refused the same way."""
+    arp = _arp(state)
+    if matcher.plugin_name != "nonebot_plugin_skland" or arp is None or not arp.find("bind"):
+        return
+    await _refuse_token(bot, event, bool(arp.all_matched_args) or len(event.get_plaintext().split()) > 1)
+    raise IgnoredException("token binding is closed")
 
 
 # ── saving a binding ────────────────────────────────────────────────────

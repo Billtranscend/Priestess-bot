@@ -19,6 +19,7 @@ def load_required_plugin(module_name: str) -> None:
         raise RuntimeError(f"Required plugin failed to load: {module_name}")
 
 
+load_required_plugin("plugins.log_privacy")
 load_required_plugin("plugins.sqlite_foreign_keys")
 load_required_plugin("plugins.command_tolerance")
 load_required_plugin("plugins.temp_session_forward")
