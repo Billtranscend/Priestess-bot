@@ -17,7 +17,7 @@ from nonebot_plugin_alconna import UniMessage, message_reaction
 __plugin_meta__ = PluginMetadata(
     name="Skland help image",
     description="Replies to /skl帮助 with the bot's command guide image.",
-    usage="/skl帮助",
+    usage="/skl帮助　/帮助　/help",
     type="application",
 )
 
@@ -31,7 +31,7 @@ REACTION_PROCESSING = "66"  # heart
 REACTION_DONE = "144"  # party popper
 REACTION_FAIL = "10060"  # cross mark
 
-skl_help = on_command("skl帮助", aliases={"skd帮助", "森空岛帮助"}, rule=strict, priority=5, block=True)
+skl_help = on_command("skl帮助", aliases={"skd帮助", "森空岛帮助", "帮助", "help"}, rule=strict, priority=5, block=True)
 
 
 async def _react(emoji: str) -> None:
