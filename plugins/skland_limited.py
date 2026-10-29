@@ -8,8 +8,11 @@ is a limited operator: the UP operator of some 限定寻访 or 重构寻访 pool
 too new for the table, of the game's own pool data). So 提弗洛斯 pulled in 万物更新 is UP instead of a
 loss, 洁尔佩塔 pulled in 辉光庆典 is UP, and 艾尔黛拉 pulled there is not.
 
-The 6★ pity of the 限定寻访 pools is shared between them, so the pulls after the last UP are counted
-across them; 辉光庆典 and 重构寻访 keep their own pity, so theirs are counted per pool.
+The 80-pull 6★ pity carries over from one 限定寻访 pool to the next, and likewise from one 重构寻访 pool
+to the next, but the two kinds do not share it (the stored records confirm both: no run without a 6★
+reaches 80 inside either kind, while runs across the two kinds do); 辉光庆典 has a pity of its own. So
+the pulls after the last UP are counted across the 限定寻访 pools, across the 重构寻访 pools, and per
+辉光庆典 pool.
 A plain module (no plugin): used by skland_ef_theme (/zmd抽卡记录) and skland_gacha_rank (/zmd欧非榜).
 """
 
@@ -65,20 +68,29 @@ def up_count(pools) -> int:
     return sum(p.total_six_stars - p.total_six_spook for p in pools)
 
 
-def _special_tail(special) -> int:
-    """Paid pulls after the last paid UP across the 限定寻访 pools (their pity is shared)."""
+def is_rerun(pool) -> bool:
+    return pool.pool_id.lower().startswith("rerun")
+
+
+def _since(pools, stop) -> int:
+    """Paid pulls after the last paid pull that `stop` accepts, across pools that share their pity."""
     pulls = sorted(
-        ((group.gacha_ts, pull.seq_id, pull, pool) for pool in special for group in pool.records for pull in group.pulls),
+        ((group.gacha_ts, pull.seq_id, pull, pool) for pool in pools for group in pool.records for pull in group.pulls),
         key=lambda entry: (entry[0], entry[1]),
     )
     count = 0
     for _, _, pull, pool in reversed(pulls):
         if pull.is_free:
             continue
-        if pull.rarity == 6 and pull.item_id in pool.up_six_chars:
+        if stop(pull, pool):
             break
         count += 1
     return count
+
+
+def pity(pools) -> int:
+    """Paid pulls since the last paid 6★ across pools that share their pity (one kind of pool)."""
+    return _since(pools, lambda pull, pool: pull.rarity == 6)
 
 
 def up_avg(special, others) -> float:
@@ -87,5 +99,8 @@ def up_avg(special, others) -> float:
     if not count:
         return 0.0
     paid = sum(p.paid_pulls for p in special + others)
-    tail = _special_tail(special) + sum(p.up_pity_count for p in others)
+    rerun = [p for p in others if is_rerun(p)]
+    joint = [p for p in others if not is_rerun(p)]
+    is_up = lambda pull, pool: pull.rarity == 6 and pull.item_id in pool.up_six_chars  # noqa: E731
+    tail = _since(special, is_up) + _since(rerun, is_up) + sum(p.up_pity_count for p in joint)
     return (paid - tail) / count

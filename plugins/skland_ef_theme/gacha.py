@@ -169,6 +169,11 @@ class Record(EfGroupedGachaRecord):
     def special_up_avg(self) -> float:
         return skland_limited.up_avg(self.special_pools, self.joint_pools + self.rerun_pools)
 
+    @property
+    def rerun_pity(self) -> int:
+        """重构寻访's 80-pull pity, carried over between its pools like 限定寻访's."""
+        return skland_limited.pity(self.rerun_pools)
+
 
 def _newest(pool) -> int:
     return max((group.gacha_ts for group in pool.records), default=0)

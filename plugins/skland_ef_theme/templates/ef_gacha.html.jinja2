@@ -280,11 +280,21 @@ img { display: block; }
                     {# 限定池跨池小保底进度条 #}
                     <div class="pity-meter">
                         <div class="pl">
-                            <span>小保底</span>
+                            <span>{{ "限定寻访小保底" if record.rerun_pools else "小保底" }}</span>
                             <span>{{ record.special_pity }}/80</span>
                         </div>
                         <div class="meter"><u style="width: {{ (record.special_pity / 80 * 100) | int }}%;"></u></div>
                     </div>
+                    {# 重构寻访的小保底在各期重构寻访之间继承，和限定寻访互不影响 #}
+                    {% if record.rerun_pools %}
+                    <div class="pity-meter">
+                        <div class="pl">
+                            <span>重构寻访小保底</span>
+                            <span>{{ record.rerun_pity }}/80</span>
+                        </div>
+                        <div class="meter"><u style="width: {{ (record.rerun_pity / 80 * 100) | int }}%;"></u></div>
+                    </div>
+                    {% endif %}
 
                 </div>
 {% endif %}
