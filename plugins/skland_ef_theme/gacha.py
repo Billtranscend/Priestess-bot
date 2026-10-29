@@ -18,8 +18,8 @@ One picture holds one kind of pool:
                       one column per kind, three columns to a picture.
 
 限定池 holds every pool that can give limited operators: 限定寻访, 辉光庆典 (联合寻访) and 重构寻访, newest
-first, and every limited operator pulled in them is an UP (plugins/skland_limited.py), in the pool
-cards and in the 限定池 figures alike.
+first. In 限定寻访 the current UP operator is the UP; in 辉光庆典 and 重构寻访 every limited operator is
+(plugins/skland_limited.py), in the pool cards and in the 限定池 figures alike.
 
 重构寻访 (rerun banners, pool ids "rerun_chr_...") is a pool type upstream neither fetches nor
 knows as a category: /zmd抽卡记录更新 fetches it here after upstream's own sync, and the grouped

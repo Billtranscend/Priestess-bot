@@ -1,12 +1,14 @@
-"""Endfield UP counting for this project: every limited operator is an UP, in every limited pool.
+"""Endfield UP counting for this project: 辉光庆典 and 重构寻访 count as limited pools too.
 
 nonebot-plugin-skland counts a 6★ as UP only when it is the current UP operator of a 限定寻访 pool
 ("special_..."), and only those pools enter the UP figures. 辉光庆典 ("joint_...") marks every 6★ of its
 line-up as UP, the standard ones too, but is left out of the figures; 重构寻访 ("rerun_chr_...") is left
-out entirely. Here the limited pools are all three kinds, and a 6★ pulled in one of them is UP when it
-is a limited operator: the UP operator of some 限定寻访 or 重构寻访 pool of the pool table (or, for a pool
-too new for the table, of the game's own pool data). So 提弗洛斯 pulled in 万物更新 is UP instead of a
-loss, 洁尔佩塔 pulled in 辉光庆典 is UP, and 艾尔黛拉 pulled there is not.
+out entirely. Here the limited pools are all three kinds:
+  限定寻访   only its current UP operator is an UP, as upstream (an earlier limited operator in its
+             line-up is a loss, by the owner's choice of 2026-10-29);
+  辉光庆典,  every limited operator pulled is an UP: the UP operator of some 限定寻访 or 重构寻访 pool of
+  重构寻访   the pool table (or, for a pool too new for the table, of the game's own pool data). So
+             洁尔佩塔 pulled in 辉光庆典 is UP, and 艾尔黛拉 pulled there is not.
 
 The 80-pull 6★ pity carries over from one 限定寻访 pool to the next, and likewise from one 重构寻访 pool
 to the next, but the two kinds do not share it (the stored records confirm both: no run without a 6★
@@ -48,13 +50,15 @@ def limited_ids(pools=()) -> set[str]:
 
 
 def mark(pools) -> None:
-    """Set the UP operators of the limited pools: the limited 6★ each can give or gave, the current UP first."""
+    """Set the UP operators of the limited pools: 限定寻访 its current UP; the others every limited 6★ they can give or gave."""
     pools = [p for p in pools if is_limited(p)]
     for pool in pools:  # the pool table first, as upstream: its UP is known even before anyone pulled it
         if table := ef_gacha_pool_data.get_pool(pool.pool_id):
             pool.up_six_chars = table.up_six_char_ids
     limited = limited_ids(pools)
     for pool in pools:
+        if pool.pool_id.lower().startswith("special"):  # the current UP only
+            continue
         table = ef_gacha_pool_data.get_pool(pool.pool_id)
         lineup = [c.id for c in table.all if c.rarity == 6] if table else []
         pulled = [pull.item_id for group in reversed(pool.records) for pull in group.pulls if pull.rarity == 6]

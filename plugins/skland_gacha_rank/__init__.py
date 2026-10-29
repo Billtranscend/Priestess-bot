@@ -4,7 +4,7 @@
 weapon pools; /角色欧非榜 and /武器欧非榜 list everyone on one of the two boards.
 
 Stats reuse Skland's own grouping (group_ef_gacha_records) and the UP counting of /zmd抽卡记录
-(plugins/skland_limited.py: 限定寻访, 辉光庆典 and 重构寻访, every limited operator an UP), so the
+(plugins/skland_limited.py: 限定寻访 with its current UP, 辉光庆典 and 重构寻访 with every limited operator), so the
 numbers match /zmd抽卡记录. Only members of the current group who have bound Skland and have not
 opted out are ranked.
 """
@@ -101,7 +101,7 @@ CHARACTERS = Board(
     pool="角色池",
     command="/角色欧非榜",
     english="Operator",
-    basis="限定池（含庆典、重构寻访）「平均多少抽出一个限定干员」",
+    basis="限定池（含庆典、重构寻访）「平均多少抽出一个 UP 干员」",
     target="一个 UP 干员",
     measure="个",
     empty="本群还没有可统计的终末地限定池抽卡记录",
