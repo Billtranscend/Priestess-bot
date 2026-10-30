@@ -327,6 +327,7 @@ NapCat 以反向 WebSocket 客户端连入。动态推送可另外搭配
 | 每天 06:00 | 检查机器人在哪些群是管理员 | `weekly_report` |
 | 每 10 分钟 | 理智回满检查 | `sanity_reminder` |
 | 每 10 分钟 | 检查 AKEData 数据版本，有新版本立即重建并通知各群（不分时段） | `endfield_wiki` |
+| 每 10 分钟 | 资料库重建后刷新终末地卡池表；缺横幅图的卡池向官方卡池页面补图（每个卡池最多每小时一次） | `skland_ef_pools` |
 | 每 5 分钟 | 检查两款游戏是否有活动开启，有则向所有群发送通知图（0–8 点开启的在 8 点发送） | `game_calendar` |
 | 每 30 分钟 | 检查明日方舟游戏数据版本，每小时查询一次 PRTS Wiki 已登记的活动 | `game_calendar` |
 | 每周日 19:00 | 发送周报（默认所有群，`data/weekly_report/config.json` 的 `groups` 可指定） | `weekly_report` |
@@ -350,6 +351,7 @@ plugins/
   ef_theme/                    共享的终末地风格样式与字体
   ark_theme/                   共享的明日方舟风格样式
   endfield_wiki/               终末地资料库（AKEData 同步、检索、资料卡）
+  skland_ef_pools/             终末地卡池表改由 AKEData 解包数据生成（名称、类型、UP、卡池内容），不再从 GitHub 下载
   endfield_guide/              高难关卡攻略、竞速榜、出场率
   endfield_roster/             终末地角色卡（/zmd开盒）
   arknights_roster/            明日方舟角色卡（/mrfz开盒）
@@ -434,7 +436,7 @@ local_plugins/                 只在本机使用的插件：放进来的包会�
 | [nonebot/adapter-onebot](https://github.com/nonebot/adapter-onebot) | OneBot v11 适配器 | MIT |
 | [NapNeko/NapCatQQ](https://github.com/NapNeko/NapCatQQ)、[NapNeko/NapCat-Docker](https://github.com/NapNeko/NapCat-Docker) | QQ 协议端及其 Docker 镜像 | 见各仓库 |
 | [FrostN0v0/nonebot-plugin-skland](https://github.com/FrostN0v0/nonebot-plugin-skland) | 森空岛绑定、签到、角色卡、抽卡记录等核心能力；`plugins/skland_ef_theme/templates/` 中的模板改写自该项目 | MIT |
-| [FrostN0v0/EndfieldGachaPoolTable](https://github.com/FrostN0v0/EndfieldGachaPoolTable) | 终末地卡池数据 | 见仓库 |
+| [FrostN0v0/EndfieldGachaPoolTable](https://github.com/FrostN0v0/EndfieldGachaPoolTable) | 早期的终末地卡池数据（现由 AKEData 生成，见 `skland_ef_pools`） | 见仓库 |
 | [SnowMoonSS/nonebot-plugin-pErithacus](https://github.com/SnowMoonSS/nonebot-plugin-pErithacus) | 关键词词库与回复 | MIT |
 | [kexue-z/nonebot-plugin-htmlrender](https://github.com/kexue-z/nonebot-plugin-htmlrender) | HTML 渲染出图 | MIT |
 | [nonebot/plugin-alconna](https://github.com/nonebot/plugin-alconna) | 指令解析与跨平台消息 | MIT |
@@ -450,7 +452,7 @@ local_plugins/                 只在本机使用的插件：放进来的包会�
 | [mozillazg/python-pinyin](https://github.com/mozillazg/python-pinyin) | 同音字检索 | MIT |
 | [sqlalchemy/sqlalchemy](https://github.com/sqlalchemy/sqlalchemy) | 数据库访问 | MIT |
 | [jpt/barlow](https://github.com/jpt/barlow) | Barlow Condensed 字体（`plugins/ef_theme/fonts/`） | SIL OFL 1.1 |
-| [AKEData](https://www.akedata.wiki/) | 终末地解包数据：干员、武器、关卡、敌人、活动与卡池时间 | 见站点说明 |
+| [AKEData](https://www.akedata.wiki/) | 终末地解包数据：干员、武器、关卡、敌人、活动与卡池时间、卡池内容 | 见站点说明 |
 | [小黑盒](https://www.xiaoheihe.cn/) | 终末地「抽卡分析」：早期抽卡记录的导入来源 | 见站点说明 |
 | [yuanyan3060/ArknightsGameResource](https://github.com/yuanyan3060/ArknightsGameResource) | 明日方舟游戏数据表：活动与卡池时间 | 见仓库说明 |
 | [PRTS Wiki](https://prts.wiki/) | 明日方舟已公布活动的时间、活动与卡池横幅（仅使用其公开 API）、卡池 UP 干员 | CC BY-NC-SA 4.0 |

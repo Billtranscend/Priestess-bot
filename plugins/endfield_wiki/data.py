@@ -64,13 +64,18 @@ TABLES = (
     "GachaWeaponPoolTable",
     "GachaCharPoolTypeTable",
     "GachaWeaponPoolTypeTable",
+    "GachaCharPoolContentTable",
+    "GachaWeaponPoolContentTable",
     "RewardTable",
     "BattlePassTaskTable",
     "BattlePassConditionTable",
     "ActivityWeeklyTaskTable",
     "ActivityWeeklyTaskMileStoneTable",
 )
-INDEX_SCHEMA = 20  # bump to force a rebuild when the index layout changes (18: leader enemies, 19: logistics skills, 20: loose equipment)
+INDEX_SCHEMA = 21  # bump to force a rebuild when the index layout changes (18: leader enemies, 19: logistics skills, 20: loose equipment, 21: gacha pools)
+# Pool `type` of the gacha tables -> nonebot-plugin-skland's pool_type. 新手 (1) and 常驻 (2) are left out, as in its own table.
+CHAR_POOL_TYPES = {0: "special", 3: "extra", 4: "rerun"}
+WEAPON_POOL_TYPES = {0: "normal", 1: "rerun"}
 # Enemy resistance attribute ids (AttributeShowConfigTable), in the in-game display order.
 ENEMY_RESISTANCES = ((94, "物理"), (98, "灼热"), (97, "电磁"), (96, "寒冷"), (95, "自然"), (99, "超域"))
 TOWER_DIFFICULTIES = {"1": "普通", "2": "困难", "3": "残酷"}
@@ -522,6 +527,7 @@ def build_index(table_dir: Path, version: dict, out_file: Path) -> dict[str, int
         "endgame": build_endgame(load, text, maps, table_dir),
         "leaders": build_leaders(load, text),
         "calendar": build_calendar(load, text),
+        "gacha_pools": build_gacha_pools(load, text),
         "version": version.get("id", ""),
         "published_at": version.get("publishedAt", ""),
         "operators": operators,
@@ -991,6 +997,35 @@ def build_calendar(load, text) -> dict:
         "activities": activities, "pools": pools, "passes": passes, "weekly": weekly, "versions": versions,
         "gifts": build_gacha_gifts(load, text),
     }
+
+
+def build_gacha_pools(load, text) -> dict:
+    """Pool id -> the pool in the layout of nonebot-plugin-skland's GachaPoolTable.json (no banner art: plugins/skland_ef_pools adds it).
+
+    {"pool_gacha_type": "char" | "weapon", "pool_name", "pool_type", "up6_name", "all": [{"id", "name", "rarity"}]}
+    `all` is everything the pool can give, from the content tables; up6_name is the UP operator or weapon.
+    """
+    chars, items = load("CharacterTable"), load("ItemTable")
+    pools = {}
+    for kind, table, content, types, up_key, id_key, names in (
+        ("char", "GachaCharPoolTable", "GachaCharPoolContentTable", CHAR_POOL_TYPES, "upCharIds", "charId", chars),
+        ("weapon", "GachaWeaponPoolTable", "GachaWeaponPoolContentTable", WEAPON_POOL_TYPES, "upWeaponIds", "itemId", items),
+    ):
+        contents = load(content)
+        for pool_id, row in load(table).items():
+            pool_type = types.get(row.get("type"))
+            lineup = (contents.get(pool_id) or {}).get("list") or []
+            if pool_type is None or not lineup:
+                continue
+            up = [text((names.get(i) or {}).get("name")) for i in row.get(up_key) or []]
+            pools[pool_id] = {
+                "pool_gacha_type": kind,
+                "pool_name": text(row.get("name")),
+                "pool_type": pool_type,
+                "up6_name": next((name for name in up if name), ""),
+                "all": [{"id": m[id_key], "name": text((names.get(m[id_key]) or {}).get("name")), "rarity": m.get("starLevel", 0)} for m in lineup],
+            }
+    return pools
 
 
 def build_gacha_gifts(load, text) -> dict:
