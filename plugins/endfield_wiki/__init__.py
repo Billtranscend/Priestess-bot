@@ -247,7 +247,14 @@ async def _tell_superusers(text: str) -> None:
 
 
 async def _notify_all_groups(version: dict, previous: str, new_names: dict[str, list[str]]) -> None:
-    """Sent as soon as the new data is in the index, whatever the hour (the owner's choice: data drops early in the morning)."""
+    """Sent as soon as the new data is in the index, whatever the hour (the owner's choice: data drops early in the morning).
+
+    Only for a version that adds operators or weapons (the owner's choice, 2026-10-30): a version with
+    new sets or stages alone, or only revised numbers and text, is taken in without a word to the groups.
+    """
+    if not (new_names.get("干员") or new_names.get("武器")):
+        logger.info(f"Endfield wiki: {version['id']} adds no operator or weapon, no group notice")
+        return
     bot = _bot()
     if bot is None:
         logger.warning("Endfield wiki: no bot online, update notice skipped")

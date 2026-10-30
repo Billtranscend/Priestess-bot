@@ -41,8 +41,6 @@ def _joined(items: list[str]) -> str:
 def notice_lines(new_names: dict[str, list[str]]) -> list[str]:
     """The body of the group notice: one line per category with something new, then how to look things up."""
     lines = [f"新增{kind}：{_joined(items)}" for kind, items in new_names.items() if items]
-    if not lines:
-        return ["本次没有新增干员、武器、套装或关卡，已有资料的数值和文本已同步更新", "发送 /干员名 或 /武器名 可查看最新资料，例如 /提丰、/提丰专武"]
     examples = [f"/{new_names[kind][0]}" for kind in ("干员", "武器", "套装") if new_names.get(kind)]
     if examples:
         lines.append(f'现在就可以查：发送 /名称 查看资料卡，例如 {"、".join(examples)}')
