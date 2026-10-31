@@ -7,7 +7,8 @@ of a piece's three attributes was refined (精锻). Only aggregates are shown: h
 which set on an operator, the most common piece per slot for each of the most used sets, and the
 average refinement of each attribute on that piece. Members who opted out of the statistics are neither fetched nor counted.
 The same card lists every operator a role owns with its potential: a member's `rosters` hold one per role of every
-bound account (the equipment above stays the default role's), for /zmd持有率.
+bound account (the equipment above stays the default role's), for /zmd持有率. Roles below HOLDING_MIN_LEVEL are kept but
+not counted: they are mostly members who only tried Endfield and play Arknights (checked 2026-10-31).
 """
 
 from __future__ import annotations
@@ -24,7 +25,8 @@ SET_PIECES = 3  # pieces that activate a set effect
 MIN_SAMPLE = 3  # fewer builds than this say nothing
 TOP_SETS = 3  # sets listed per operator, most used first
 REFINE_SLOTS = 3  # attributes per piece; each is refined 0-3 times
-BUILD_SCHEMA = 4  # 2: refinement levels per piece, 3: roster of owned operators, 4: one roster per role of every account
+BUILD_SCHEMA = 5  # 2: refinement levels per piece, 3: roster of owned operators, 4: one roster per role of every account, 5: with the role's level
+HOLDING_MIN_LEVEL = 30  # 权限等级, the owner's choice
 
 
 def extract(detail: dict) -> dict[str, dict]:
@@ -55,9 +57,20 @@ def roster(detail: dict) -> dict[str, int]:
     return owned
 
 
+def role_roster(detail: dict) -> dict:
+    """What a role's card says for the ownership statistics: {"level": 权限等级, "owned": roster}."""
+    return {"level": int((detail.get("base") or {}).get("level") or 0), "owned": roster(detail)}
+
+
 def holdings(members: dict, exclude: set[str] = frozenset()) -> tuple[int, dict[str, tuple[int, float]]]:
-    """(roles with a roster, operator name -> (roles owning it, their average potential)); a roster of nothing is a hidden card, not a player without operators."""
-    rosters = [owned for qq, member in members.items() if qq not in exclude for owned in (member.get("rosters") or {}).values() if owned]
+    """(roles counted, operator name -> (roles owning it, their average potential)); a roster of nothing is a hidden card, not a player without operators."""
+    rosters = [
+        role["owned"]
+        for qq, member in members.items()
+        if qq not in exclude
+        for role in (member.get("rosters") or {}).values()
+        if role.get("owned") and role.get("level", 0) >= HOLDING_MIN_LEVEL
+    ]
     owners: dict[str, list[int]] = {}
     for owned in rosters:
         for name, potential in owned.items():
