@@ -6,7 +6,8 @@ keeps, per operator at MIN_LEVEL or above, the four equipped pieces, their sets 
 of a piece's three attributes was refined (精锻). Only aggregates are shown: how many members run
 which set on an operator, the most common piece per slot for each of the most used sets, and the
 average refinement of each attribute on that piece. Members who opted out of the statistics are neither fetched nor counted.
-The same card lists every operator a member owns with its potential: kept as the member's `roster`, for /zmd持有率.
+The same card lists every operator a role owns with its potential: a member's `rosters` hold one per role of every
+bound account (the equipment above stays the default role's), for /zmd持有率.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ SET_PIECES = 3  # pieces that activate a set effect
 MIN_SAMPLE = 3  # fewer builds than this say nothing
 TOP_SETS = 3  # sets listed per operator, most used first
 REFINE_SLOTS = 3  # attributes per piece; each is refined 0-3 times
-BUILD_SCHEMA = 3  # 2: refinement levels per piece, 3: roster of owned operators
+BUILD_SCHEMA = 4  # 2: refinement levels per piece, 3: roster of owned operators, 4: one roster per role of every account
 
 
 def extract(detail: dict) -> dict[str, dict]:
@@ -55,8 +56,8 @@ def roster(detail: dict) -> dict[str, int]:
 
 
 def holdings(members: dict, exclude: set[str] = frozenset()) -> tuple[int, dict[str, tuple[int, float]]]:
-    """(members with a roster, operator name -> (members owning it, their average potential)); a roster of nothing is a hidden card, not a player without operators."""
-    rosters = [member["roster"] for qq, member in members.items() if qq not in exclude and member.get("roster")]
+    """(roles with a roster, operator name -> (roles owning it, their average potential)); a roster of nothing is a hidden card, not a player without operators."""
+    rosters = [owned for qq, member in members.items() if qq not in exclude for owned in (member.get("rosters") or {}).values() if owned]
     owners: dict[str, list[int]] = {}
     for owned in rosters:
         for name, potential in owned.items():

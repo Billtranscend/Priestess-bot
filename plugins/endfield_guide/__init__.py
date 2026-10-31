@@ -6,7 +6,7 @@
 /敌人 <关卡|丰碑> [难度]   mechanics and enemy attributes, no teams or videos (/回响敌人: this week's rotation, /丰碑敌人: the current series)
 /攻略统计 退出|加入        opt out of / back into the group clear-team statistics
 /竞速榜                   menu → /回响竞速 [关卡]  /丰碑竞速 [丰碑|关卡]
-/zmd持有率                share of bound players owning each 6-star operator, with the owners' average potential
+/zmd持有率                share of bound roles (every account) owning each 6-star operator, with the owners' average potential
 
 Stage data comes from the endfield_wiki AKEData index; clear teams from members'
 Skland War Echoes records (collected twice a day); videos from Bilibili search.
@@ -950,8 +950,8 @@ async def _(bot: Bot, event: MessageEvent, arg: Message = CommandArg()) -> None:
 HOLDING_RARITY = 6  # the owner's choice: lower rarities say little
 HOLDING_LEFT_OUT = {"管理员"}  # everyone starts with the Endministrator: it says nothing about pulls
 HOLDING_FOOT = (
-    "持有率 = 持有该干员的玩家数 ÷ 已统计玩家数；平均潜能只算持有者，范围 0–5；管理员开局赠送，不计入<br>"
-    "每位绑定玩家只算默认角色，只代表绑定了机器人的玩家；数据每天 03:00 更新；不想参与可发送 /攻略统计 退出"
+    "持有率 = 持有该干员的角色数 ÷ 已统计角色数；平均潜能只算持有者，范围 0–5；管理员开局赠送，不计入<br>"
+    "绑定的所有森空岛账号和角色都计入，一人多号算多个；只代表绑定了机器人的玩家；数据每天 03:00 更新；不想参与可发送 /攻略统计 退出"
 )
 
 
@@ -984,7 +984,7 @@ async def _() -> None:
             await _react(REACTION_DONE)
             await holding_board.finish("持有率数据还在收集，请稍后再试")
         body = await _holding_body(total, held)
-        image = await _board_page("终末地 · <em>6★ 干员持有率</em>", f"全部绑定玩家（不分群）共 {total} 人，附持有者的平均潜能", body, HOLDING_FOOT, "Endfield · Operator Ownership")
+        image = await _board_page("终末地 · <em>6★ 干员持有率</em>", f"全部绑定角色（不分群）共 {total} 个，附持有者的平均潜能", body, HOLDING_FOOT, "Endfield · Operator Ownership")
         await UniMessage.image(raw=image).send()
     except MatcherException:
         raise

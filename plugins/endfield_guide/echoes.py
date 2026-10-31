@@ -25,7 +25,7 @@ from nonebot_plugin_user.models import Bind
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 
-from plugins.skland_roles import default_role
+from plugins.skland_roles import default_role, member_roles
 
 from .builds import CARD_URL, BuildStore, extract, roster
 
@@ -182,7 +182,9 @@ class EchoStore:
                     await asyncio.sleep(REQUEST_GAP)
                 card = await _fetch(CARD_URL, user, char)
                 detail = card.get("detail") or {}
-                build_members[qq] = {"ts": time.time(), "chars": extract(detail), "roster": roster(detail)}
+                rosters = await self._other_rosters(session, bind_id, char, (build_members.get(qq) or {}).get("rosters") or {}, stats)
+                rosters[str(char.id)] = roster(detail)
+                build_members[qq] = {"ts": time.time(), "chars": extract(detail), "rosters": rosters}
                 stats["builds"] += 1
             except Exception as e:
                 stats[f"builds_{type(e).__name__}"] += 1
@@ -190,6 +192,25 @@ class EchoStore:
         # SQLite's write lock for minutes and make binding / gacha updates fail.
         await _commit(session, stats)
         await asyncio.sleep(REQUEST_GAP)
+
+
+    @staticmethod
+    async def _other_rosters(session, bind_id: int, default: Character, previous: dict, stats: Counter) -> dict:
+        """Rosters of a member's other roles, on any account; a role that fails keeps its previous one, an unbound role is gone."""
+        rosters = {}
+        for user, char in await member_roles(session, bind_id):
+            if char.id == default.id:
+                continue
+            key = str(char.id)
+            await asyncio.sleep(REQUEST_GAP)
+            try:
+                rosters[key] = roster((await _fetch(CARD_URL, user, char)).get("detail") or {})
+                stats["other_roles"] += 1
+            except Exception as e:
+                stats[f"other_roles_{type(e).__name__}"] += 1
+                if key in previous:
+                    rosters[key] = previous[key]
+        return rosters
 
 
 async def _commit(session, stats: Counter) -> None:
