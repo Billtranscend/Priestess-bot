@@ -27,7 +27,7 @@ from sqlalchemy.exc import OperationalError
 
 from plugins.skland_roles import default_role
 
-from .builds import CARD_URL, BuildStore, extract
+from .builds import CARD_URL, BuildStore, extract, roster
 
 WAR_ECHOES_URL = "https://zonai.skland.com/api/v1/game/endfield/card/war-echoes"
 INDIE_HARD_URL = "https://zonai.skland.com/api/v1/game/endfield/card/indie-hard"  # 影拓丰碑
@@ -181,7 +181,8 @@ class EchoStore:
                 if clears:
                     await asyncio.sleep(REQUEST_GAP)
                 card = await _fetch(CARD_URL, user, char)
-                build_members[qq] = {"ts": time.time(), "chars": extract(card.get("detail") or {})}
+                detail = card.get("detail") or {}
+                build_members[qq] = {"ts": time.time(), "chars": extract(detail), "roster": roster(detail)}
                 stats["builds"] += 1
             except Exception as e:
                 stats[f"builds_{type(e).__name__}"] += 1

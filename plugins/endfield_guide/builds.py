@@ -6,6 +6,7 @@ keeps, per operator at MIN_LEVEL or above, the four equipped pieces, their sets 
 of a piece's three attributes was refined (精锻). Only aggregates are shown: how many members run
 which set on an operator, the most common piece per slot for each of the most used sets, and the
 average refinement of each attribute on that piece. Members who opted out of the statistics are neither fetched nor counted.
+The same card lists every operator a member owns with its potential: kept as the member's `roster`, for /zmd持有率.
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ SET_PIECES = 3  # pieces that activate a set effect
 MIN_SAMPLE = 3  # fewer builds than this say nothing
 TOP_SETS = 3  # sets listed per operator, most used first
 REFINE_SLOTS = 3  # attributes per piece; each is refined 0-3 times
-BUILD_SCHEMA = 2  # 2: refinement levels per piece
+BUILD_SCHEMA = 3  # 2: refinement levels per piece, 3: roster of owned operators
 
 
 def extract(detail: dict) -> dict[str, dict]:
@@ -41,6 +42,26 @@ def extract(detail: dict) -> dict[str, dict]:
         if any(equips):
             chars[name] = {"lv": level, "equips": equips}
     return chars
+
+
+def roster(detail: dict) -> dict[str, int]:
+    """Operator name -> potential (0-5) of everything on a card's `detail`, at any level. Male and female Endministrator share a name."""
+    owned: dict[str, int] = {}
+    for char in detail.get("chars") or []:
+        name = (char.get("charData") or {}).get("name")
+        if name:
+            owned[name] = max(owned.get(name, 0), int(char.get("potentialLevel") or 0))
+    return owned
+
+
+def holdings(members: dict, exclude: set[str] = frozenset()) -> tuple[int, dict[str, tuple[int, float]]]:
+    """(members with a roster, operator name -> (members owning it, their average potential)); a roster of nothing is a hidden card, not a player without operators."""
+    rosters = [member["roster"] for qq, member in members.items() if qq not in exclude and member.get("roster")]
+    owners: dict[str, list[int]] = {}
+    for owned in rosters:
+        for name, potential in owned.items():
+            owners.setdefault(name, []).append(potential)
+    return len(rosters), {name: (len(levels), sum(levels) / len(levels)) for name, levels in owners.items()}
 
 
 def aggregate(members: dict, exclude: set[str] = frozenset()) -> dict:
@@ -132,6 +153,9 @@ class BuildStore:
 
     def wearers(self, names: set[str], exclude: set[str] = frozenset()) -> dict:
         return wearers(self.load().get("members") or {}, names, exclude)
+
+    def holdings(self, exclude: set[str] = frozenset()) -> tuple[int, dict[str, tuple[int, float]]]:
+        return holdings(self.load().get("members") or {}, exclude)
 
     def stats(self, exclude: set[str] = frozenset()) -> dict:
         """Aggregates, recomputed when the file or the opt-out list changes."""

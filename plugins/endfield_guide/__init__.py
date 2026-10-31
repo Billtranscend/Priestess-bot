@@ -6,6 +6,7 @@
 /敌人 <关卡|丰碑> [难度]   mechanics and enemy attributes, no teams or videos (/回响敌人: this week's rotation, /丰碑敌人: the current series)
 /攻略统计 退出|加入        opt out of / back into the group clear-team statistics
 /竞速榜                   menu → /回响竞速 [关卡]  /丰碑竞速 [丰碑|关卡]
+/zmd持有率                share of bound players owning each 6-star operator, with the owners' average potential
 
 Stage data comes from the endfield_wiki AKEData index; clear teams from members'
 Skland War Echoes records (collected twice a day); videos from Bilibili search.
@@ -97,6 +98,7 @@ speed_board = on_command("竞速榜", rule=strict, priority=5, block=True)
 echo_speed = on_command("回响竞速", aliases={"战争回响竞速"}, rule=strict, priority=5, block=True)
 monument_speed = on_command("丰碑竞速", aliases={"影拓丰碑竞速"}, rule=strict, priority=5, block=True)
 usage_board = on_command("榜单角色出场率", aliases={"角色出场率"}, rule=strict, priority=5, block=True)
+holding_board = on_command("zmd持有率", aliases={"终末地持有率", "干员持有率", "持有率"}, rule=strict, priority=5, block=True)
 collect_now = on_command("攻略数据更新", rule=strict, permission=SUPERUSER, priority=5, block=True)
 
 
@@ -715,6 +717,9 @@ tr:first-child .bar { background: var(--ef-yellow); box-shadow: inset 0 0 0 1px 
 td.ic { width: 58px; } td.ic img { width: 42px; height: 42px; object-fit: contain; display: block; background: var(--ef-panel-2); border: 1px solid var(--ef-line); }
 td.pc { width: 100px; text-align: right; font-family: var(--ef-num); font-weight: 700; font-size: 22px; white-space: nowrap; }
 td.ct { width: 84px; text-align: right; color: var(--ef-sub); font-size: 15px; white-space: nowrap; }
+td.pt { width: 92px; text-align: right; font-family: var(--ef-num); font-weight: 700; font-size: 22px; white-space: nowrap; }
+tr.hd td { padding: 6px 10px; font-size: 13px; color: var(--ef-sub); border-top: 0; text-align: right; font-family: inherit; }
+tr.hd + tr td { border-top: 1px solid var(--ef-line-2); }
 """
 
 BOARD_WIDTH = 1000
@@ -939,6 +944,54 @@ async def _(bot: Bot, event: MessageEvent, arg: Message = CommandArg()) -> None:
         logger.warning(f"Usage board failed: {type(e).__name__}: {e}")
         await _react(REACTION_FAIL)
         await usage_board.finish("出场率生成失败，请稍后再试")
+    await _react(REACTION_DONE)
+
+
+HOLDING_RARITY = 6  # the owner's choice: lower rarities say little
+HOLDING_LEFT_OUT = {"管理员"}  # everyone starts with the Endministrator: it says nothing about pulls
+HOLDING_FOOT = (
+    "持有率 = 持有该干员的玩家数 ÷ 已统计玩家数；平均潜能只算持有者，范围 0–5；管理员开局赠送，不计入<br>"
+    "每位绑定玩家只算默认角色，只代表绑定了机器人的玩家；数据每天 03:00 更新；不想参与可发送 /攻略统计 退出"
+)
+
+
+async def _holding_body(total: int, held: dict[str, tuple[int, float]]) -> str:
+    """Most owned first. An operator nobody owns is left out: it may not be released yet."""
+    by_name: dict[str, tuple[str, dict]] = {}
+    for char_id, operator in sorted(wiki._resolver()[0]["operators"].items()):
+        by_name.setdefault(operator["name"], (char_id, operator))  # the three Endministrator ids share one entry
+    rows = sorted(
+        ((name, *held[name], by_name[name][0]) for name in held if name in by_name and name not in HOLDING_LEFT_OUT and by_name[name][1]["rarity"] == HOLDING_RARITY),
+        key=lambda row: (-row[1], -row[2], row[0]),
+    )
+    cells = ['<tr class="hd"><td colspan="3"></td><td>持有率</td><td>平均潜能</td></tr>']
+    for name, owners, potential, char_id in rows:
+        src = await _icon(char_id)
+        cells.append(
+            f'<tr><td class="ic">{f"<img src={chr(34)}{escape(src)}{chr(34)}>" if src else ""}</td><td class="nm">{escape(name)}</td>'
+            f'<td><div class="bar" style="width:{max(1, owners / total * 100):.0f}%"></div></td>'
+            f'<td class="pc">{owners / total * 100:.1f}%</td><td class="pt">{potential:.2f}</td></tr>'
+        )
+    return f'<div class="ef-sec"><h3>{HOLDING_RARITY}★ 干员<small class="cjk">{len(rows)} 位</small></h3><table>{"".join(cells)}</table></div>'
+
+
+@holding_board.handle()
+async def _() -> None:
+    await _react(REACTION_PROCESSING)
+    try:
+        total, held = build_store.holdings(echo_store.optout())
+        if not total:
+            await _react(REACTION_DONE)
+            await holding_board.finish("持有率数据还在收集，请稍后再试")
+        body = await _holding_body(total, held)
+        image = await _board_page("终末地 · <em>6★ 干员持有率</em>", f"全部绑定玩家（不分群）共 {total} 人，附持有者的平均潜能", body, HOLDING_FOOT, "Endfield · Operator Ownership")
+        await UniMessage.image(raw=image).send()
+    except MatcherException:
+        raise
+    except Exception as e:
+        logger.warning(f"Holding board failed: {type(e).__name__}: {e}")
+        await _react(REACTION_FAIL)
+        await holding_board.finish("持有率生成失败，请稍后再试")
     await _react(REACTION_DONE)
 
 
