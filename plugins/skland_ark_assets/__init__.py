@@ -18,12 +18,17 @@ before anyone asks.
 Like /mrfz开盒, /方舟干员 does not draw a page with pictures still missing: before upstream renders a
 roster page, the portraits, skill icons and module icons of that page that are not cached are fetched
 (ENSURE_TIMEOUT at most; whatever is still loading after that finishes in the background).
+
+/mrfz抽卡记录 works the same for the operator avatars of its page. The ids come from the records, so an
+operator from today's game update is covered before the catalog knows it. A picture that cannot be
+had leaves the grey square of the template, not a failed page; it is asked for again after AVATAR_RETRY.
 """
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
+import time
 from pathlib import Path
 from urllib.parse import quote
 
@@ -37,6 +42,7 @@ from nonebot_plugin_apscheduler import scheduler
 
 from nonebot_plugin_skland import filters, render
 from nonebot_plugin_skland.commands import box
+from nonebot_plugin_skland.commands import gacha as gacha_command
 from nonebot_plugin_skland.config import CACHE_DIR
 from nonebot_plugin_skland.schemas.arknights import card as card_module
 from nonebot_plugin_skland.schemas.arknights import operators
@@ -46,6 +52,8 @@ ASSETS = CACHE_DIR / "ark_assets"
 UNIEQUIP_URL = "https://torappu.prts.wiki/assets/uniequip_direction/{}.png"  # as upstream's ark_uniequip_icon_url
 PORTRAIT_URL = "https://web.hycdn.cn/arknights/game/assets/char_skin/portrait/{}.png"  # as ark_skin_portrait_url
 SKILL_URL = "https://web.hycdn.cn/arknights/game/assets/char_skill/{}.png"  # as ark_skill_icon_url
+AVATAR_URL = "https://web.hycdn.cn/arknights/game/assets/char/avatar/{}.png"  # as charId_to_avatarUrl
+AVATAR_RETRY = 300  # seconds before a page waits again for an avatar that could not be fetched
 TIMEOUT = 20
 ENSURE_TIMEOUT = 8  # seconds a roster page waits for its missing pictures
 PREFETCH_HOURS = 6
@@ -56,7 +64,7 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 (K
 
 _ORIGINAL = {
     name: getattr(filters, name)
-    for name in ("ark_skin_portrait_url", "ark_skill_icon_url", "ark_uniequip_icon_url")
+    for name in ("ark_skin_portrait_url", "ark_skill_icon_url", "ark_uniequip_icon_url", "charId_to_avatarUrl")
 }
 _DECO_SOURCES = {**{("lh", r): u for r, u in filters.ARK_ROSTER_LH_URLS.items()},
                  **{("light", r): u for r, u in filters.ARK_ROSTER_LIGHT_URLS.items()}}
@@ -118,6 +126,18 @@ def ark_skin_portrait_url(skin_id: str) -> str:
     return _uri(CACHE_DIR / "portrait" / f"{char_id}_1.png") or _uri(CACHE_DIR / "portrait" / f"{char_id}_2.png") or BLANK
 
 
+def _avatar_path(char_id: str) -> Path:
+    return CACHE_DIR / "avatar" / f"{_portrait_id(char_id)}.png"
+
+
+def charId_to_avatarUrl(char_id: str) -> str:
+    path = _avatar_path(char_id)
+    if path.is_file():
+        return path.as_uri()
+    _later(AVATAR_URL.format(quote(char_id, safe="")), path)
+    return BLANK
+
+
 def ark_skill_icon_url(skill_id: str) -> str:
     path = CACHE_DIR / "skill" / f"skill_icon_{skill_id}.png"
     if path.is_file():
@@ -155,8 +175,9 @@ REPLACEMENTS = {
     "ark_skin_portrait_url": ark_skin_portrait_url,
     "ark_skill_icon_url": ark_skill_icon_url,
     "ark_uniequip_icon_url": ark_uniequip_icon_url,
+    "charId_to_avatarUrl": charId_to_avatarUrl,
 }
-MODULES = (filters, operators, card_module, assist_chars, chars)
+MODULES = (filters, render, operators, card_module, assist_chars, chars)
 for _module in MODULES:
     for _name, _replacement in REPLACEMENTS.items():
         if getattr(_module, _name, None) is _ORIGINAL[_name]:
@@ -183,25 +204,31 @@ def _page_jobs(props) -> dict[Path, str]:
     return {path: url for path, url in jobs.items() if path not in _pending}
 
 
+async def _wait_for(jobs: dict[Path, str]) -> list[asyncio.Task]:
+    """Fetch these pictures, waiting ENSURE_TIMEOUT at most; the rest finishes in the background."""
+    gate = asyncio.Semaphore(6)
+
+    async def one(path: Path, url: str) -> bool:
+        async with gate:
+            return await _download(url, path)
+
+    tasks = [asyncio.ensure_future(one(p, u)) for p, u in jobs.items()]
+    for task in tasks:
+        _tasks.add(task)
+        task.add_done_callback(_tasks.discard)
+    _pending.update(jobs)
+    done, _ = await asyncio.wait(tasks, timeout=ENSURE_TIMEOUT)
+    logger.info(f"Skland Arknights assets: page waited for {sum(t.result() for t in done)}/{len(jobs)} missing pictures")
+    return tasks
+
+
 _original_render = render.render_operator_roster
 
 
 async def render_operator_roster(*, props, background_image):
     jobs = _page_jobs(props)
     if jobs:
-        gate = asyncio.Semaphore(6)
-
-        async def one(path: Path, url: str) -> bool:
-            async with gate:
-                return await _download(url, path)
-
-        tasks = [asyncio.ensure_future(one(p, u)) for p, u in jobs.items()]
-        for task in tasks:
-            _tasks.add(task)
-            task.add_done_callback(_tasks.discard)
-        _pending.update(jobs)
-        done, _ = await asyncio.wait(tasks, timeout=ENSURE_TIMEOUT)
-        logger.info(f"Skland Arknights assets: page waited for {sum(t.result() for t in done)}/{len(jobs)} missing pictures")
+        await _wait_for(jobs)
     return await _original_render(props=props, background_image=background_image)
 
 
@@ -209,8 +236,38 @@ render.render_operator_roster = render_operator_roster
 box.render_operator_roster = render_operator_roster
 
 
+_avatar_retry: dict[Path, float] = {}
+
+
+def _gacha_jobs(props, begin: int | None, limit: int | None) -> dict[Path, str]:
+    """The avatars of one page of the gacha history that are not cached yet."""
+    ids: set[str] = set()
+    for pool in props.pools[begin:limit]:
+        ids.update(pool.up_six_chars)
+        ids.update(pull.char_id for group in pool.records for pull in group.pulls)
+    now = time.monotonic()
+    jobs = {_avatar_path(char_id): AVATAR_URL.format(quote(char_id, safe="")) for char_id in ids}
+    return {path: url for path, url in jobs.items() if not path.is_file() and path not in _pending and _avatar_retry.get(path, 0) <= now}
+
+
+_original_gacha_render = render.render_gacha_history
+
+
+async def render_gacha_history(props, status, nickname, channel_master_id, begin=None, limit=None):
+    jobs = _gacha_jobs(props, begin, limit)
+    if jobs:
+        await _wait_for(jobs)
+        retry = time.monotonic() + AVATAR_RETRY
+        _avatar_retry.update((path, retry) for path in jobs if not path.is_file())
+    return await _original_gacha_render(props, status, nickname, channel_master_id, begin=begin, limit=limit)
+
+
+render.render_gacha_history = render_gacha_history
+gacha_command.render_gacha_history = render_gacha_history
+
+
 async def prefetch() -> None:
-    """Rarity decorations, module icons and default portraits of the whole catalog that are not cached yet."""
+    """Rarity decorations, module icons, default portraits and avatars of the whole catalog that are not cached yet."""
     jobs = {_deco_path(url): url for url in set(_DECO_SOURCES.values()) if not _deco_path(url).is_file()}
     with_catalog = 0
     try:
@@ -225,6 +282,8 @@ async def prefetch() -> None:
                 jobs[_uniequip_path(t)] = UNIEQUIP_URL.format(quote(t, safe=""))
         with_catalog = len(types)
         for e in catalog.entries:  # default portraits; only 4-star and up have an elite 2 picture
+            if not _avatar_path(e.char_id).is_file():
+                jobs[_avatar_path(e.char_id)] = AVATAR_URL.format(quote(e.char_id, safe=""))
             elite2 = CACHE_DIR / "portrait" / f"{e.char_id}_2.png"
             for n in (1, 2) if e.rarity >= 3 else (1,):
                 path = CACHE_DIR / "portrait" / f"{e.char_id}_{n}.png"
@@ -253,6 +312,8 @@ async def _verify_and_prefetch() -> None:
                 raise RuntimeError(f"Skland Arknights asset hook missing: {module.__name__}.{name}")
     if render.render_operator_roster is not render_operator_roster or box.render_operator_roster is not render_operator_roster:
         raise RuntimeError("Skland Arknights roster hook missing")
+    if render.render_gacha_history is not render_gacha_history or gacha_command.render_gacha_history is not render_gacha_history:
+        raise RuntimeError("Skland Arknights gacha hook missing")
     task = asyncio.get_running_loop().create_task(prefetch())
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)

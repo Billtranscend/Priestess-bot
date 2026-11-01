@@ -2,6 +2,8 @@
 
 /zmd导入小黑盒 <小黑盒ID>   rebuild the pools / periods the official API no longer returns
 /zmd撤销小黑盒导入          remove everything this command imported for the caller
+/mrfz导入小黑盒 <导出链接>   Arknights: upstream's import of a Heybox export link (the shortcut is in skland_shortcuts);
+                            here it only gets replies for what upstream would fail on silently
 
 The official record API only reaches back a few months; Heybox keeps what its users uploaded
 earlier. Its public overview (readable by Heybox id, no login) is fetched by opening the tool page
@@ -25,11 +27,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import re
 import time
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
-from nonebot import logger, on_command, require
+import httpx
+from nonebot import logger, on_command, on_message, require
 from nonebot.adapters import Message
 from nonebot.adapters.onebot.v11 import MessageEvent
 from nonebot.exception import MatcherException
@@ -54,7 +58,9 @@ import nonebot_plugin_localstore as store
 from nonebot_plugin_alconna import UniMessage, message_reaction
 from nonebot_plugin_htmlrender import get_new_page
 from nonebot_plugin_orm import async_scoped_session, get_session
+from nonebot_plugin_skland.commands import gacha as ark_gacha_command
 from nonebot_plugin_skland.data_source import ef_gacha_pool_data
+from nonebot_plugin_skland.exception import RequestException
 from nonebot_plugin_skland.model import Character, CharacterDefault, GachaRecord, SkUser
 from nonebot_plugin_user import UserSession
 from sqlalchemy import delete, event, func, insert, select
@@ -444,3 +450,40 @@ async def _(user_session: UserSession, session: async_scoped_session) -> None:
     _last_run.pop(user_id, None)
     await _react(REACTION_DONE)
     await undo_cmd.finish(f"已撤销小黑盒导入，删除 {removed} 条导入记录；官方记录不受影响" if removed else "你没有从小黑盒导入过记录", at_sender=True)
+
+
+# ── Arknights: upstream's import, with replies ─────────────────────────
+
+ARK_USAGE = "用法：/mrfz导入小黑盒 导出链接（建议私聊发送）\n这里要的是小黑盒方舟抽卡分析「数据管理」里导出的链接，不是小黑盒 ID"
+ARK_UNREADABLE = "这个链接读取失败：请确认是小黑盒方舟抽卡分析导出的链接，且没有过期；过期的话重新导出一次再发"
+_ark_import = ark_gacha_command.import_handler
+
+
+async def _ark_import_with_replies(url, user_session, session, *, role_index=None) -> None:
+    if not (url.available and url.result.strip().lower().startswith(("https://", "http://"))):
+        await UniMessage(ARK_USAGE).finish(at_sender=True)
+    try:
+        await _ark_import(url, user_session, session, role_index=role_index)
+    except MatcherException:
+        raise
+    except (httpx.HTTPError, RequestException, ValueError, KeyError, TypeError) as e:
+        logger.warning(f"Arknights Heybox import failed: {type(e).__name__}")
+        await _react(REACTION_FAIL)
+        await UniMessage(ARK_UNREADABLE).finish(at_sender=True)
+
+
+ark_gacha_command.import_handler = _ark_import_with_replies
+
+
+async def _ark_import_without_link(event: Event) -> bool:
+    return re.fullmatch(r"\s*/\s*(?:明日方舟|方舟|mrfz)导入小黑盒\s*", event.get_plaintext()) is not None
+
+
+# Upstream's command would otherwise open a completion prompt and wait for the link in the next message.
+ark_import_usage = on_message(rule=_ark_import_without_link, priority=0, block=True)
+
+
+@ark_import_usage.handle()
+async def _() -> None:
+    await UniMessage(ARK_USAGE).finish(at_sender=True)
+

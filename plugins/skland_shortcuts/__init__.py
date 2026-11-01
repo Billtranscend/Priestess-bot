@@ -68,6 +68,7 @@ CUSTOM_SHORTCUTS = (
     *_query(r"(明日方舟|方舟|mrfz)签到详情", "skland arksign status"),
     ShortcutSpec(r"(明日方舟|方舟|mrfz)签到", "skland arksign sign --all"),
     *_query(r"(明日方舟|方舟|mrfz)抽卡记录", "skland gacha"),
+    ShortcutSpec(r"(明日方舟|方舟|mrfz)导入小黑盒", "skland import", fuzzy=True),
 )
 
 if any(not spec.prefix for spec in CUSTOM_SHORTCUTS):
@@ -78,6 +79,7 @@ CONFLICTING_BUILTINS = (
     "森空岛解绑",
     "明日方舟签到",
     "方舟抽卡记录",
+    "导入抽卡记录",  # /mrfz导入小黑盒 now, in line with /zmd导入小黑盒
     "终末地签到",
     "终末地签到详情",
     "终末地全体签到",
