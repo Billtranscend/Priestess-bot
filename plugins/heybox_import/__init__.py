@@ -2,8 +2,8 @@
 
 /zmd导入小黑盒 <小黑盒ID>   rebuild the pools / periods the official API no longer returns
 /zmd撤销小黑盒导入          remove everything this command imported for the caller
-/mrfz导入小黑盒 <导出链接>   Arknights: upstream's import of a Heybox export link (the shortcut is in skland_shortcuts);
-                            here it only gets replies for what upstream would fail on silently
+/mrfz导入小黑盒 <导出链接>   Arknights: paused (ARK_PAUSED), Heybox's export gives no link to paste. No request is made;
+                            the import with replies is kept for when links can be had
 
 The official record API only reaches back a few months; Heybox keeps what its users uploaded
 earlier. Its public overview (readable by Heybox id, no login) is fetched by opening the tool page
@@ -455,6 +455,7 @@ async def _(user_session: UserSession, session: async_scoped_session) -> None:
 # ── Arknights: upstream's import, with replies ─────────────────────────
 
 ARK_USAGE = "用法：/mrfz导入小黑盒 导出链接（建议私聊发送）\n这里要的是小黑盒方舟抽卡分析「数据管理」里导出的链接，不是小黑盒 ID"
+ARK_PAUSED = "小黑盒导出链接目前拿不到，此功能暂停"
 ARK_UNREADABLE = "这个链接读取失败：请确认是小黑盒方舟抽卡分析导出的链接，且没有过期；过期的话重新导出一次再发"
 _ark_import = ark_gacha_command.import_handler
 
@@ -472,18 +473,23 @@ async def _ark_import_with_replies(url, user_session, session, *, role_index=Non
         await UniMessage(ARK_UNREADABLE).finish(at_sender=True)
 
 
-ark_gacha_command.import_handler = _ark_import_with_replies
+async def _ark_import_paused(url, user_session, session, *, role_index=None) -> None:
+    await UniMessage(ARK_PAUSED).finish(at_sender=True)
 
 
-async def _ark_import_without_link(event: Event) -> bool:
-    return re.fullmatch(r"\s*/\s*(?:明日方舟|方舟|mrfz)导入小黑盒\s*", event.get_plaintext()) is not None
+ark_gacha_command.import_handler = _ark_import_paused  # _ark_import_with_replies when links can be had
+
+ARK_IMPORT_COMMAND = re.compile(r"\s*/\s*(?:(?:明日方舟|方舟|mrfz)导入小黑盒|(?:skland|sk)\s+import(?=\s|$))", re.I)
 
 
-# Upstream's command would otherwise open a completion prompt and wait for the link in the next message.
-ark_import_usage = on_message(rule=_ark_import_without_link, priority=0, block=True)
+async def _is_ark_import(event: Event) -> bool:
+    return ARK_IMPORT_COMMAND.match(event.get_plaintext()) is not None
 
 
-@ark_import_usage.handle()
+# Ahead of upstream, which opens a completion prompt for a missing link or a misread option.
+ark_import_paused = on_message(rule=_is_ark_import, priority=0, block=True)
+
+
+@ark_import_paused.handle()
 async def _() -> None:
-    await UniMessage(ARK_USAGE).finish(at_sender=True)
-
+    await UniMessage(ARK_PAUSED).finish(at_sender=True)
