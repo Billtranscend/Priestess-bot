@@ -607,7 +607,7 @@ async def _render(endgame, group, stage, difficulty, clears, target_text, videos
     if target_text:
         extra += _box("增辉条件", f'<div class="desc">{escape(target_text)}</div>')
     elif is_tower and difficulty == "残酷":
-        extra += _box("增辉条件", '<div class="desc dim">残酷难度完成附加目标（多为限时通关）即可增辉</div>')
+        extra += _box("增辉条件", '<div class="desc dim">通关残酷难度并完成该关卡的附加挑战目标，可使该关卡评级获得增辉。</div>')
     if not is_tower and difficulty == "苦难":
         extra += _box("镀层", '<div class="desc dim">通关该系列苦难模式的全部关卡后，即可为该系列蚀刻章镀层</div>')
 
