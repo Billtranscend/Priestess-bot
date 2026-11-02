@@ -1,4 +1,4 @@
-"""Weekly group report, posted on Sunday 19:00 (Asia/Shanghai).
+"""Weekly group report, posted on Sunday 20:00 (Asia/Shanghai).
 
 Sections: this week's group essence messages (the bot's own are skipped), weekly task reminders,
 this group's War Echoes speed top 3, rotation countdown and the next rotation, activities opening /
@@ -14,6 +14,8 @@ while AT_ALL is True: the owner turned it off on 2026-10-18.
 /周报预览   (superuser) render the report for the current chat, never with @全体
 /本周任务   (everyone) the weekly task section alone: Arknights annihilation, weekly missions and 保全派驻;
             Endfield 每周事务 and the pass's weekly tasks (the owner's choice: the rotation has its own section)
+            The same picture goes to every group at 20:00 Monday to Saturday (Sunday 20:00 is the report); a group owner or admin (or a superuser)
+            stops it there with /本周任务 关闭 and resumes it with /本周任务 开启 (data/weekly_report/tasks_off.json).
 """
 
 from __future__ import annotations
@@ -30,7 +32,8 @@ from html import escape
 import httpx
 from PIL import Image
 from nonebot import logger, on_command, require
-from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent, MessageSegment
+from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageEvent, MessageSegment
+from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
 from nonebot.plugin import PluginMetadata
 
@@ -52,7 +55,7 @@ from plugins import endfield_wiki as wiki
 
 __plugin_meta__ = PluginMetadata(
     name="Weekly report",
-    description="每周日 19:00 的群周报。",
+    description="每周日 20:00 的群周报。",
     usage="/周报预览（超级用户）",
     type="application",
 )
@@ -64,6 +67,8 @@ DATA_DIR = store.get_plugin_data_dir()
 DATA_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
 ADMIN_FILE = DATA_DIR / "admin_groups.json"  # refreshed daily at 06:00
 CONFIG_FILE = DATA_DIR / "config.json"  # {"groups": [...]}: the only groups that get the Sunday report
+TASKS_OFF_FILE = DATA_DIR / "tasks_off.json"  # [group numbers] that turned the daily /本周任务 picture off
+ROLES = {"owner", "admin"}  # may turn the daily picture off or on in their group
 ESSENCE_LIMIT = 8
 IMAGE_LIMIT = 10 * 1024 * 1024
 AT_ALL = False  # @全体成员 with the scheduled Sunday report; off at the owner's request since 2026-10-18
@@ -466,7 +471,7 @@ async def build_report(bot: Bot, group_id: int | None, viewer: str | None = None
             f'WEEK<b>{week_start:%y}-W{week_start.isocalendar().week:02d}</b>',
         )
         + "".join(sections)
-        + ef_theme.foot(f'关卡、活动与卡池数据来自 AKEData（版本 {escape(index.get("version", ""))}），竞速记录来自森空岛，每天 05:30、17:30 更新<br>每周日 19:00 发送 · 全部指令发 /skl帮助')
+        + ef_theme.foot(f'关卡、活动与卡池数据来自 AKEData（版本 {escape(index.get("version", ""))}），竞速记录来自森空岛，每天 05:30、17:30 更新<br>每周日 20:00 发送 · 全部指令发 /skl帮助')
         + "</body></html>"
     )
     return await ef_theme.render_page(html, WIDTH, height=600, template_path=wiki.DATA_DIR.as_uri())
@@ -573,6 +578,32 @@ async def send_all(bot: Bot, at_all: bool = True) -> dict[str, int]:
     return stats
 
 
+@scheduler.scheduled_job("cron", day_of_week="mon-sat", hour=20, minute=0, timezone="Asia/Shanghai", id="weekly_tasks_daily", misfire_grace_time=1800)
+async def _daily_tasks() -> None:
+    """The /本周任务 picture to every group that has not turned it off; drawn once, sent one group at a time."""
+    bot = _current_bot()
+    if bot is None:
+        logger.warning("Daily weekly tasks: no OneBot connection")
+        return
+    try:
+        image = await build_tasks()
+    except Exception as e:
+        logger.warning(f"Daily weekly tasks: page failed ({type(e).__name__})")
+        return
+    off, sent, failed = _tasks_off(), 0, 0
+    for group in await bot.get_group_list():
+        if group["group_id"] in off:
+            continue
+        try:
+            await (_current_bot() or bot).send_group_msg(group_id=group["group_id"], message=MessageSegment.image(image))
+            sent += 1
+        except Exception as e:
+            failed += 1
+            logger.warning(f"Daily weekly tasks failed for a group: {type(e).__name__}")
+        await asyncio.sleep(SEND_GAP)
+    logger.info(f"Daily weekly tasks sent to {sent} groups, {failed} failed, {len(off)} turned off")
+
+
 @scheduler.scheduled_job("cron", hour=6, minute=0, timezone="Asia/Shanghai", id="weekly_report_admin_check", misfire_grace_time=3600)
 async def _admin_check() -> None:
     bot = _current_bot()
@@ -582,7 +613,7 @@ async def _admin_check() -> None:
     await refresh_admin_groups(bot)
 
 
-@scheduler.scheduled_job("cron", day_of_week="sun", hour=19, minute=0, timezone="Asia/Shanghai", id="weekly_report", misfire_grace_time=600)
+@scheduler.scheduled_job("cron", day_of_week="sun", hour=20, minute=0, timezone="Asia/Shanghai", id="weekly_report", misfire_grace_time=600)
 async def _weekly() -> None:
     bot = _current_bot()
     if bot is None:
@@ -604,14 +635,39 @@ async def build_tasks() -> bytes:
         f'<!doctype html><html><head><meta charset="utf-8"><style>{ef_theme.css()}{CSS % WIDTH}</style></head><body class="ef">'
         + ef_theme.head("Weekly Tasks", "本周 <em>任务</em>", f"{reset - timedelta(days=7):%m/%d} – {reset:%m/%d} 周一 04:00 重置")
         + _tasks_section(index, now)
-        + ef_theme.foot(f'明日方舟数据来自游戏数据表，终末地数据来自 AKEData（版本 {escape(index.get("version", ""))}）<br>周报每周日 19:00 发送 · 全部指令发 /skl帮助')
+        + ef_theme.foot(f'明日方舟数据来自游戏数据表，终末地数据来自 AKEData（版本 {escape(index.get("version", ""))}）<br>周报每周日 20:00 发送 · 全部指令发 /skl帮助')
         + "</body></html>"
     )
     return await ef_theme.render_page(html, WIDTH, height=600, template_path=wiki.DATA_DIR.as_uri())
 
 
+def _tasks_off() -> set[int]:
+    try:
+        return {int(g) for g in json.loads(TASKS_OFF_FILE.read_text("utf-8"))}
+    except (OSError, ValueError, TypeError):
+        return set()
+
+
+def _set_tasks_off(group_id: int, off: bool) -> None:
+    groups = _tasks_off() - {group_id} | ({group_id} if off else set())
+    tmp = TASKS_OFF_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(sorted(groups)), "utf-8")
+    tmp.chmod(0o600)
+    tmp.replace(TASKS_OFF_FILE)
+
+
 @tasks_command.handle()
-async def _() -> None:
+async def _(bot: Bot, event: MessageEvent, arg: Message = CommandArg()) -> None:
+    action = arg.extract_plain_text().strip()
+    if action in ("关闭", "开启"):
+        if not isinstance(event, GroupMessageEvent):
+            await tasks_command.finish("请在群里发送：/本周任务 关闭 或 /本周任务 开启")
+        if (event.sender.role or "") not in ROLES and not await SUPERUSER(bot, event):
+            await tasks_command.finish("只有群主和管理员可以开关本群的每日任务推送")
+        _set_tasks_off(event.group_id, action == "关闭")
+        await tasks_command.finish("已关闭本群每天 20:00（周日除外）的本周任务推送，发送 /本周任务 开启 可恢复" if action == "关闭" else "已开启本群每天 20:00（周日除外）的本周任务推送")
+    if action:
+        await tasks_command.finish("用法：/本周任务　群主、管理员可发 /本周任务 关闭 或 开启 每天 20:00 的推送（周日不推送）")
     try:
         image = await build_tasks()
     except Exception as e:
