@@ -39,6 +39,7 @@ from nonebot.plugin import PluginMetadata
 
 from plugins.strict_command import strict
 
+require("nonebot_plugin_alconna")
 require("nonebot_plugin_apscheduler")
 require("nonebot_plugin_htmlrender")
 require("nonebot_plugin_localstore")
@@ -47,6 +48,7 @@ require("plugins.endfield_guide")
 
 from nonebot import get_bots
 import nonebot_plugin_localstore as store
+from nonebot_plugin_alconna import message_reaction
 from nonebot_plugin_apscheduler import scheduler
 
 from plugins import endfield_guide as guide
@@ -69,6 +71,7 @@ ADMIN_FILE = DATA_DIR / "admin_groups.json"  # refreshed daily at 06:00
 CONFIG_FILE = DATA_DIR / "config.json"  # {"groups": [...]}: the only groups that get the Sunday report
 TASKS_OFF_FILE = DATA_DIR / "tasks_off.json"  # [group numbers] that turned the daily /本周任务 picture off
 ROLES = {"owner", "admin"}  # may turn the daily picture off or on in their group
+REACTION_PROCESSING, REACTION_DONE, REACTION_FAIL = "66", "144", "10060"  # as the other commands
 ESSENCE_LIMIT = 8
 IMAGE_LIMIT = 10 * 1024 * 1024
 AT_ALL = False  # @全体成员 with the scheduled Sunday report; off at the owner's request since 2026-10-18
@@ -656,6 +659,11 @@ def _set_tasks_off(group_id: int, off: bool) -> None:
     tmp.replace(TASKS_OFF_FILE)
 
 
+async def _react(emoji: str) -> None:
+    with contextlib.suppress(Exception):
+        await message_reaction(emoji)
+
+
 @tasks_command.handle()
 async def _(bot: Bot, event: MessageEvent, arg: Message = CommandArg()) -> None:
     action = arg.extract_plain_text().strip()
@@ -665,15 +673,19 @@ async def _(bot: Bot, event: MessageEvent, arg: Message = CommandArg()) -> None:
         if (event.sender.role or "") not in ROLES and not await SUPERUSER(bot, event):
             await tasks_command.finish("只有群主和管理员可以开关本群的每日任务推送")
         _set_tasks_off(event.group_id, action == "关闭")
+        await _react(REACTION_DONE)
         await tasks_command.finish("已关闭本群每天 20:00（周日除外）的本周任务推送，发送 /本周任务 开启 可恢复" if action == "关闭" else "已开启本群每天 20:00（周日除外）的本周任务推送")
     if action:
         await tasks_command.finish("用法：/本周任务　群主、管理员可发 /本周任务 关闭 或 开启 每天 20:00 的推送（周日不推送）")
+    await _react(REACTION_PROCESSING)
     try:
         image = await build_tasks()
     except Exception as e:
         logger.warning(f"Weekly tasks page failed: {type(e).__name__}")
+        await _react(REACTION_FAIL)
         await tasks_command.finish("本周任务生成失败，请稍后再试")
-    await tasks_command.finish(MessageSegment.image(image))
+    await tasks_command.send(MessageSegment.image(image))
+    await _react(REACTION_DONE)
 
 
 @preview.handle()
