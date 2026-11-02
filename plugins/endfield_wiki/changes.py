@@ -54,12 +54,22 @@ def _plain(html: str) -> str:
     return re.sub(r"<[^>]+>", "", html or "").strip()
 
 
+def goal_gaps(index: dict) -> list[str]:
+    """战争回响 stages whose top difficulty has no 增辉 condition yet."""
+    return [
+        group.get("name", "?")
+        for group in ((index.get("endgame") or {}).get("tower") or {}).values()
+        if any(stage.get("difficulty") == "残酷" and not stage.get("extra_goal") for stage in group.get("stages", []))
+    ]
+
+
 def problems(index: dict) -> list[str]:
     """Signs that the game data uses something this code does not read yet: a card would show a blank or a hole."""
     found: list[str] = []
     for kind, minimum in (("operators", 1), ("weapons", 1), ("equip_sets", 1)):
         if len(index.get(kind) or {}) < minimum:
             found.append(f"索引里没有任何{ {'operators': '干员', 'weapons': '武器', 'equip_sets': '套装'}[kind] }")
+    found += [f"战争回响「{name}」读不到增辉条件" for name in goal_gaps(index)]
     for op in (index.get("operators") or {}).values():
         who = f'干员「{op.get("name", "?")}」'
         if not op.get("skills"):

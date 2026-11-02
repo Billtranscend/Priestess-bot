@@ -54,6 +54,7 @@ STATE_FILE = DATA_DIR / "state.json"
 IMAGE_DIR = DATA_DIR / "img"
 ALIASES_FILE = Path(__file__).with_name("aliases.json")
 MISSES_FILE = DATA_DIR / "misses.json"  # unresolved name-like queries (text + count only), for curating aliases
+GOAL_RETRY_SECONDS = 6 * 3600
 SYNC_MINUTES = 10  # one small request; new data usually appears around 06:00-07:00 Beijing on a game update day
 MANIFEST_FAILURES_BEFORE_ALERT = 3  # the data site being unreachable for a while is not worth a message
 NOTIFY_GAP = 3.0
@@ -276,8 +277,11 @@ async def sync(force: bool = False) -> str:
         DATA_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
         state = _read_json(STATE_FILE, {})
         async with data.http_client() as client:
-            outdated = _read_json(INDEX_FILE, {}).get("schema", 1) < data.INDEX_SCHEMA if INDEX_FILE.exists() else True
-            force = force or outdated
+            current = _read_json(INDEX_FILE, {}) if INDEX_FILE.exists() else {}
+            outdated = current.get("schema", 1) < data.INDEX_SCHEMA if INDEX_FILE.exists() else True
+            # The files with the 增辉 conditions are published apart from the tables and may come later.
+            late_goals = changes.goal_gaps(current) and time.time() - state.get("synced_at", 0) >= GOAL_RETRY_SECONDS
+            force = force or outdated or bool(late_goals)
             manifest = await data.fetch_manifest(client)
             latest = next(v for v in manifest["versions"] if v["id"] == manifest["latest"])
             previous = state.get("version")

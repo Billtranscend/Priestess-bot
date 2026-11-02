@@ -1,6 +1,6 @@
 """Endfield endgame stage guides: 战争回响 and 影拓丰碑.
 
-/攻略 <关卡名> [难度]     stage card: mechanics, enemies, 增辉 target, group clear teams, Bilibili videos
+/攻略 <关卡名> [难度]     stage card: mechanics, enemies, 增辉 condition, group clear teams, Bilibili videos
 /战争回响                 this week's rotation: stages in game order with their covers
 /影拓丰碑 [丰碑名]         every series with its cover; one series: its stages in game order with covers
 /敌人 <关卡|丰碑> [难度]   mechanics and enemy attributes, no teams or videos (/回响敌人: this week's rotation, /丰碑敌人: the current series)
@@ -471,7 +471,7 @@ async def _(bot: Bot, event: MessageEvent, arg: Message = CommandArg()) -> None:
         pool, _ = await _member_pool(bot, event)
         data = _load_echoes()
         clears = team_stats(data, pool, f"{group['name']}|{difficulty}")
-        target_text = data.get("targets", {}).get(f"{group['name']}|{difficulty}", "")
+        target_text = data.get("targets", {}).get(f"{group['name']}|{difficulty}", "") or stage.get("extra_goal", "")
         html = await _render(endgame, group, stage, difficulty, clears, target_text, videos, stale, isinstance(event, GroupMessageEvent))
         image = await ef_theme.render_page(html, WIDTH, template_path=wiki.DATA_DIR.as_uri())
         await UniMessage.image(raw=image).send()

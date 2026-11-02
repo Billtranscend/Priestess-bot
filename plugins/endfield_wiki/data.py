@@ -64,6 +64,7 @@ TABLES = (
     "GachaWeaponPoolTable",
     "GachaCharPoolTypeTable",
     "GachaWeaponPoolTypeTable",
+    "TextTable",
     "GachaCharPoolContentTable",
     "GachaWeaponPoolContentTable",
     "RewardTable",
@@ -72,7 +73,8 @@ TABLES = (
     "ActivityWeeklyTaskTable",
     "ActivityWeeklyTaskMileStoneTable",
 )
-INDEX_SCHEMA = 21  # bump to force a rebuild when the index layout changes (18: leader enemies, 19: logistics skills, 20: loose equipment, 21: gacha pools)
+INDEX_SCHEMA = 22  # bump to force a rebuild when the index layout changes (18: leader enemies, 19: logistics skills, 20: loose equipment, 21: gacha pools, 22: 增辉 conditions)
+EXTRA_GOAL_FILES = ("GameplayConfig/SubGameInstanceDataTable.json", "GameplayConfig/ScriptTaskExtraInfoTable.json")
 # Pool `type` of the gacha tables -> nonebot-plugin-skland's pool_type. 新手 (1) and 常驻 (2) are left out, as in its own table.
 CHAR_POOL_TYPES = {0: "special", 3: "extra", 4: "rerun"}
 WEAPON_POOL_TYPES = {0: "normal", 1: "rerun"}
@@ -163,6 +165,7 @@ async def download_stage_data(client: httpx.AsyncClient, target: Path) -> None:
         buff_ids.update(enemies.get(enemy_id, {}).get("bornBuffs") or [])
     paths = [p for p in (f"BuffData/{b}.json" for b in sorted(filter(None, buff_ids))) if p in files and SAFE_PATH.match(p)]
     await asyncio.gather(*(fetch(p) for p in paths))
+    await asyncio.gather(*(fetch(p) for p in EXTRA_GOAL_FILES if p in files))
 
 
 # ── description formatting ─────────────────────────────────────────────
@@ -544,6 +547,34 @@ def build_index(table_dir: Path, version: dict, out_file: Path) -> dict[str, int
     return {"operators": len(operators), "weapons": len(weapons), "foes": len(foes), "foes_plain": sum(1 for f in foes if f.get("plain"))}
 
 
+def extra_goals(load, text, table_dir: Path) -> dict[str, str]:
+    """战争回响 stage id -> its 附加挑战目标, the condition for 增辉, found the way the game's own stage page finds it.
+
+    SubGameInstanceDataTable names the stage's script and extra task, ScriptTaskExtraInfoTable the text key
+    of that task, TextTable the text. Skland's `additionalChallengeTarget` for the same thing is always empty.
+    """
+    if not all((table_dir / path).is_file() for path in EXTRA_GOAL_FILES):
+        return {}
+    games = load("GameplayConfig/SubGameInstanceDataTable").get("dataTable") or {}
+    tasks = load("GameplayConfig/ScriptTaskExtraInfoTable").get("dataTable") or {}
+    labels = load("TextTable")
+    goals = {}
+    for stage_id, game in games.items():
+        extra = game.get("extraTasks") or []
+        if game.get("gameMechanicsType") != "DungeonSeasonTower" or not extra:
+            continue
+        script = str(game.get("bindScriptId"))
+        info = next((scripts[script][extra[0].get("taskId")] for scripts in tasks.values() if extra[0].get("taskId") in scripts.get(script, {})), None)
+        if info is None:
+            continue
+        aims = [aim.get("description") or {} for aim in (info.get("trackingInfoDict") or {}).values()]
+        key = (info.get("singleDescription") or {}).get("key") or next((aim.get("key") for aim in aims if aim.get("key")), "")
+        goal = re.sub(r"<[^<>]*>", "", text(labels.get(key))).strip()
+        if goal:
+            goals[stage_id] = goal
+    return goals
+
+
 def build_endgame(load, text, maps: dict, table_dir: Path) -> dict:
     """Stage index for 战争回响 (season tower) and 影拓丰碑 (high-difficulty series)."""
     dungeons, series = load("DungeonTable"), load("DungeonSeriesTable")
@@ -562,6 +593,7 @@ def build_endgame(load, text, maps: dict, table_dir: Path) -> dict:
     )
     spawner_cache: dict[str, list[dict]] = {}
     buff_cache: dict[str, dict] = {}
+    goals = extra_goals(load, text, table_dir)
 
     def base_name(stage_id: str) -> str:
         return text(dungeons.get(stage_id, {}).get("dungeonName")).split("·")[0].strip()
@@ -673,6 +705,7 @@ def build_endgame(load, text, maps: dict, table_dir: Path) -> dict:
             "recommend_lv": row.get("recommendLv", 0),
             "feature": rich_to_html(fill_placeholders(text(row.get("featureDesc")), params)),
             "special_buff": rich_to_html(fill_placeholders(buff, params)) if buff else "",
+            "extra_goal": goals.get(stage_id, ""),
             "enemies": foes,
         }
 

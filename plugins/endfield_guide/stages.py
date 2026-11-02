@@ -339,7 +339,9 @@ def _mechanics(stages: list[dict]) -> str:
             blocks[-1][0].append(stage["difficulty"])
         else:
             blocks.append(([stage["difficulty"]], text))
-    return "".join(f'<div class="mech"><span class="dt">{"<br>".join(escape(d) for d in names)}</span><div class="desc">{text}</div></div>' for names, text in blocks)
+    rows = "".join(f'<div class="mech"><span class="dt">{"<br>".join(escape(d) for d in names)}</span><div class="desc">{text}</div></div>' for names, text in blocks)
+    goals = "".join(f'<div class="mech"><span class="dt">增辉</span><div class="desc">{escape(s["difficulty"])}难度：{escape(s["extra_goal"])}</div></div>' for s in stages if s.get("extra_goal"))
+    return rows + goals  # apart from the blocks, which difficulties with the same mechanics still share
 
 
 def enemies_html(theme, kicker: str, title: str, chips: str, groups: list[dict], difficulty: str | None, icons: dict[str, str], version: str) -> str:
