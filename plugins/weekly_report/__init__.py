@@ -12,6 +12,8 @@ refreshed daily at 06:00 and re-checked, role + today's @全体 quota, right bef
 while AT_ALL is True: the owner turned it off on 2026-10-18.
 
 /周报预览   (superuser) render the report for the current chat, never with @全体
+/本周任务   (everyone) the weekly task section alone: Arknights annihilation, weekly missions and 保全派驻;
+            Endfield 每周事务 and the pass's weekly tasks (the owner's choice: the rotation has its own section)
 """
 
 from __future__ import annotations
@@ -67,6 +69,7 @@ IMAGE_LIMIT = 10 * 1024 * 1024
 AT_ALL = False  # @全体成员 with the scheduled Sunday report; off at the owner's request since 2026-10-18
 
 preview = on_command("周报预览", rule=strict, permission=SUPERUSER, priority=5, block=True)
+tasks_command = on_command("本周任务", aliases={"每周任务", "周常任务"}, rule=strict, priority=5, block=True)
 
 
 # ── helpers ─────────────────────────────────────────────────────────────
@@ -123,12 +126,38 @@ def _card(title: str, body: str, note: str = "") -> str:
 # ── sections ────────────────────────────────────────────────────────────
 
 
-def _tasks_section(index: dict, now: datetime) -> str:
-    rows = []
+def _ark_weekly() -> dict:
+    from plugins.game_calendar import ARKNIGHTS_FILE, arknights
+
+    return arknights.load(ARKNIGHTS_FILE).get("weekly") or {}
+
+
+def _ark_rows(ark: dict, now: datetime) -> list[str]:
     reset = _next_monday_4am(now)
-    rows.append(
-        f'<tr><td class="tag ak"><span>明日方舟</span></td><td><b>剿灭作战、周常任务</b><div class="sub">周一 {reset:%m/%d} 04:00 重置，还剩 {_left(reset, now)}</div></td></tr>'
-    )
+    when = f"周一 {reset:%m/%d} 04:00 重置，还剩 {_left(reset, now)}"
+    stamp = now.timestamp()
+    rotation = next((r for r in ark.get("annihilation", []) if r["open"] <= stamp <= r["close"] and r["stage"]), None)
+    current = f"；本期轮换「{escape(rotation['stage'])}」，{datetime.fromtimestamp(rotation['close'], CN):%m/%d} 结束" if rotation else ""
+    rows = [f'<tr><td class="tag ak"><span>明日方舟</span></td><td><b>剿灭作战</b><div class="sub">{when}{current}</div></td></tr>']
+    if ark.get("missions"):
+        items = "".join(f'<li>{escape(m["desc"])}<em>{m["points"]} 点</em></li>' for m in ark["missions"])
+        goal = f"，满 {ark['goal']} 点领取全部奖励" if ark.get("goal") else ""
+        rows.append(
+            f'<tr><td class="tag ak"><span>明日方舟</span></td><td><b>周常任务</b>'
+            f'<div class="sub">{when}；共 {ark["mission_count"]} 个、{ark["points"]} 点{goal}</div><ul class="tasks">{items}</ul></td></tr>'
+        )
+    for season in ark.get("sss", []):
+        if season["open"] <= stamp <= season["close"]:
+            end = datetime.fromtimestamp(season["close"] + 1, CN)
+            rows.append(
+                f'<tr><td class="tag ak"><span>明日方舟</span></td><td><b>保全派驻 · {escape(season["name"])}</b>'
+                f'<div class="sub">{end:%m/%d %H:%M} 结束，还剩 {_left(end, now)}</div></td></tr>'
+            )
+    return rows
+
+
+def _tasks_section(index: dict, now: datetime) -> str:
+    rows = _ark_rows(_ark_weekly(), now)
     weekly = index.get("calendar", {}).get("weekly") or {}
     opened = _parse(weekly.get("open", ""))
     if opened and weekly.get("weeks") and opened <= now:
@@ -167,20 +196,6 @@ def _tasks_section(index: dict, now: datetime) -> str:
             rows.append(
                 f'<tr><td class="tag ef"><span>终末地</span></td><td><b>通行证 第 {week["week"]} 周周常</b>'
                 f'<div class="sub">{nxt}本期通行证 {end:%m/%d %H:%M} 结束</div><ul class="tasks">{tasks}</ul></td></tr>'
-            )
-    endgame = index.get("endgame", {})
-    for season, week, start, end in _rotations(endgame):
-        if start <= now < end:
-            rows.append(
-                f'<tr><td class="tag ef"><span>终末地</span></td><td><b>战争回响 本期轮换</b>'
-                f'<div class="sub">{escape(_rotation_name(season, week))}，{end:%m/%d %H:%M} 轮换，还剩 {_left(end, now)}</div></td></tr>'
-            )
-    for activity in index.get("calendar", {}).get("activities", []):
-        start, end = _parse(activity["open"]), _parse(activity["close"])
-        if activity["id"].startswith("activity_high_difficulty") and start and end and start <= now < end:
-            rows.append(
-                f'<tr><td class="tag ef"><span>终末地</span></td><td><b>{escape(activity["name"])}</b>'
-                f'<div class="sub">影拓丰碑限时活动，{end:%m/%d %H:%M} 结束，还剩 {_left(end, now)}</div></td></tr>'
             )
     return _card("每周任务提醒", f'<table class="list">{"".join(rows)}</table>')
 
@@ -578,6 +593,31 @@ async def _weekly() -> None:
         await refresh_admin_groups(bot)
     stats = await send_all(bot, at_all=AT_ALL)
     logger.info(f"Weekly report sent in {time.time() - started:.0f}s: {stats}")
+
+
+async def build_tasks() -> bytes:
+    now = datetime.now(CN)
+    loaded = wiki._resolver()
+    index = loaded[0] if loaded else {}
+    reset = _next_monday_4am(now)
+    html = (
+        f'<!doctype html><html><head><meta charset="utf-8"><style>{ef_theme.css()}{CSS % WIDTH}</style></head><body class="ef">'
+        + ef_theme.head("Weekly Tasks", "本周 <em>任务</em>", f"{reset - timedelta(days=7):%m/%d} – {reset:%m/%d} 周一 04:00 重置")
+        + _tasks_section(index, now)
+        + ef_theme.foot(f'明日方舟数据来自游戏数据表，终末地数据来自 AKEData（版本 {escape(index.get("version", ""))}）<br>周报每周日 19:00 发送 · 全部指令发 /skl帮助')
+        + "</body></html>"
+    )
+    return await ef_theme.render_page(html, WIDTH, height=600, template_path=wiki.DATA_DIR.as_uri())
+
+
+@tasks_command.handle()
+async def _() -> None:
+    try:
+        image = await build_tasks()
+    except Exception as e:
+        logger.warning(f"Weekly tasks page failed: {type(e).__name__}")
+        await tasks_command.finish("本周任务生成失败，请稍后再试")
+    await tasks_command.finish(MessageSegment.image(image))
 
 
 @preview.handle()

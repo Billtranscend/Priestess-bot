@@ -12,12 +12,15 @@ anything the tables do not have yet is added. Only the API is used; the wiki's p
 bot check and are not fetched.
 
 A small index is kept on disk: the game part is rebuilt when the repository's version file changes,
-the wiki part about once an hour.
+the wiki part about once an hour. With the game part go the weekly items for /本周任务 and the weekly
+report (`weekly`): the weekly missions (mission_table), the annihilation rotation (campaign_table, stage
+names from stage_table) and the 保全派驻 seasons (climb_tower_table).
 """
 
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 
@@ -28,6 +31,7 @@ VERSION_URL = f"{RAW}/refs/heads/main/version"
 ACTIVITY_URL = f"{RAW}/main/gamedata/excel/activity_table.json"
 GACHA_URL = f"{RAW}/main/gamedata/excel/gacha_table.json"
 POOL_DETAIL_URL = "https://weedy.prts.wiki/gacha_table.json"
+WEEKLY_URLS = {name: f"{RAW}/main/gamedata/excel/{name}.json" for name in ("mission_table", "campaign_table", "climb_tower_table", "stage_table")}
 WIKI_API = "https://prts.wiki/api.php"
 WIKI_QUERY = "[[分类:有活动信息的页面]][[活动结束时间::>{since}]]|?名称|?名称缩短|?分类|?活动开始时间|?活动结束时间|?标题图文件名|sort=活动开始时间|order=asc|limit=50"
 WIKI_POOL_QUERY = "[[分类:国服寻访]][[寻访关闭时间cn::>{since}]]|?寻访名cn|?寻访开启时间cn|?寻访关闭时间cn|sort=寻访开启时间cn|order=asc|limit=30"
@@ -186,6 +190,37 @@ def merge(game: list[dict], wiki: list[dict]) -> list[dict]:
     return sorted(merged, key=lambda a: a["start"])
 
 
+def build_weekly(missions: dict, campaigns: dict, towers: dict, stages: dict) -> dict:
+    """Weekly missions grouped by kind (one line per kind, its tiers and points), annihilation rotations and 保全派驻 seasons."""
+    kinds: dict[str, dict] = {}
+    for row in sorted((m for m in missions.get("missions", {}).values() if m.get("type") == "WEEKLY"), key=lambda m: m.get("sortId", 0)):
+        text = row.get("description", "")
+        kind = kinds.setdefault(re.sub(r"\d+", "{}", text, count=1), {"counts": [], "points": 0})
+        if number := re.search(r"\d+", text):
+            kind["counts"].append(int(number.group()))
+        kind["points"] += row.get("periodicalPoint", 0)
+    lines = []
+    for template, kind in kinds.items():
+        counts = sorted(kind["counts"])
+        amount = f"{counts[0]}–{counts[-1]}" if len(counts) > 1 else str(counts[0]) if counts else ""
+        lines.append({"desc": template.format(amount) if "{}" in template else template, "points": kind["points"]})
+    now = time.time()
+    rewards = [r for r in missions.get("weeklyRewards", {}).values() if r.get("beginTime", 0) <= now <= r.get("endTime", 0)]
+    rotations = [
+        {"stage": (stages.get(r.get("stageId", "")) or {}).get("name", ""), "open": r.get("startTs", 0), "close": r.get("endTs", 0)}
+        for r in campaigns.get("campaignRotateStageOpenTimes", [])
+    ]
+    seasons = [{"name": s.get("name", ""), "open": s.get("startTs", 0), "close": s.get("endTs", 0)} for s in towers.get("seasonInfos", {}).values()]
+    return {
+        "missions": lines,
+        "mission_count": sum(len(k["counts"]) or 1 for k in kinds.values()),
+        "points": sum(line["points"] for line in lines),
+        "goal": sum(r.get("periodicalPointCost", 0) for r in rewards),
+        "annihilation": rotations,
+        "sss": seasons,
+    }
+
+
 def load(cache_file: Path) -> dict:
     try:
         return json.loads(cache_file.read_text("utf-8"))
@@ -224,6 +259,18 @@ async def refresh(cache_file: Path, character_table: Path) -> str:
             activities, pools = build(tables[0], tables[1], details, _operator_names(character_table), now)
             cached.update(version=version, fetched=now, game_activities=activities, pools=pools)
             done.append(f"game data {version}: {len(activities)} activities, {len(pools)} pools")
+        if (cached.get("weekly") or {}).get("version") != version:  # stage_table is ~20 MB: once per game version
+            try:
+                tables = {}
+                for name, url in WEEKLY_URLS.items():
+                    response = await client.get(url)
+                    response.raise_for_status()
+                    tables[name] = response.json()
+                weekly = build_weekly(tables["mission_table"], tables["campaign_table"], tables["climb_tower_table"], tables["stage_table"].get("stages", {}))
+                cached["weekly"] = {"version": version, **weekly}
+                done.append(f"weekly: {len(weekly['missions'])} mission kinds")
+            except (httpx.HTTPError, ValueError) as e:  # the old weekly part stays; asked again next time
+                done.append(f"weekly unavailable ({type(e).__name__})")
         if now - (cached.get("wiki") or {}).get("fetched", 0) >= WIKI_INTERVAL:
             since = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now - 86400))
             failure = ""

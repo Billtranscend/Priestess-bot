@@ -62,7 +62,7 @@ A QQ group bot for Arknights: Endfield / Arknights communities, built on NoneBot
 ### 通知与群功能
 
 - 活动日历与活动开启通知（两款游戏）：有活动开启时在各群发一张通知图，不 @全体，夜间开启的在早上统一发
-- 群周报（每周日 19:00）：本周群精华、每周任务、本群竞速前三、关卡轮换、活动与卡池倒计时
+- 群周报（每周日 19:00）：本周群精华、每周任务、本群竞速前三、关卡轮换、活动与卡池倒计时；每周任务部分也可以随时用 `/本周任务` 查看
 - 理智查询，理智回满时在群内提醒
 - 自动同意入群邀请；可选为新群添加 nonebot-bison 的默认订阅，机器人被移出群后自动移除该群的订阅，见「部署」
 
@@ -257,13 +257,14 @@ NapCat 以反向 WebSocket 客户端连入。动态推送可另外搭配
 | `/套装名`、`/装备名` | 装备套装资料卡：3 件套效果、各件装备属性（未精锻与精锻满级）、成员使用统计，例如 `/险关`、`/潮涌手甲`；散件按系列出卡，例如 `/涉渊护手` |
 | `/干员名配装` | 同 `/干员名`，干员卡内含群友配装统计 |
 
-### 活动日历
+### 活动日历与周常
 
 | 指令 | 作用 |
 |---|---|
 | `/zmd活动`（`/终末地活动`、`/zmd日历` 等） | 终末地正在开放和即将开启的活动、卡池及截止时间 |
 | `/mrfz活动`（`/明日方舟活动`、`/粥活动`、`/舟日历` 等） | 明日方舟，同上 |
 | `/活动`、`/日历` | 两款游戏各发一张 |
+| `/本周任务`（`/每周任务`、`/周常任务`） | 两款游戏的周常：方舟剿灭（本期轮换）、周常任务、保全派驻，终末地每周事务、通行证周常 |
 
 游戏名与「活动 / 日历 / 活动日历 / 活动列表」之间可以有空格或「的」。时间均为北京时间。
 
@@ -452,7 +453,7 @@ local_plugins/                 只在本机使用的插件：放进来的包会�
 | [jpt/barlow](https://github.com/jpt/barlow) | Barlow Condensed 字体（`plugins/ef_theme/fonts/`） | SIL OFL 1.1 |
 | [AKEData](https://www.akedata.wiki/) | 终末地解包数据：干员、武器、关卡、敌人、增辉条件、活动与卡池时间、卡池内容 | 见站点说明 |
 | [小黑盒](https://www.xiaoheihe.cn/) | 终末地「抽卡分析」：早期抽卡记录的导入来源 | 见站点说明 |
-| [yuanyan3060/ArknightsGameResource](https://github.com/yuanyan3060/ArknightsGameResource) | 明日方舟游戏数据表：活动与卡池时间 | 见仓库说明 |
+| [yuanyan3060/ArknightsGameResource](https://github.com/yuanyan3060/ArknightsGameResource) | 明日方舟游戏数据表：活动与卡池时间、周常任务、剿灭轮换、保全派驻 | 见仓库说明 |
 | [PRTS Wiki](https://prts.wiki/) | 明日方舟已公布活动的时间、活动与卡池横幅（仅使用其公开 API）、卡池 UP 干员 | CC BY-NC-SA 4.0 |
 
 第三方代码与字体的版权声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
