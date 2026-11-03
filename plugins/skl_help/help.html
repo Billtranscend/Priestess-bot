@@ -74,7 +74,11 @@ body { width: 1080px; padding: 26px; }
 .cols { display: grid; grid-template-columns: 1fr 1fr; }
 .cols .bd + .bd { border-left: 1px solid var(--ef-line); }
 .colh { margin-bottom: 4px; font-size: 15px; font-weight: 700; letter-spacing: 2px; color: var(--ef-sub); }
-.safe { display: grid; grid-template-columns: 1.25fr 1fr auto; gap: 22px; }
+.safe { display: grid; grid-template-columns: 1.25fr 1fr auto; }
+.safe > div { padding: 0 22px; }
+.safe > div:first-child { padding-left: 0; }
+.safe > div:last-child { padding-right: 0; }
+.safe > div + div { border-left: 1px solid var(--ef-line); }
 .safe > div:last-child { white-space: nowrap; }
 .warn { position: relative; }
 .warn:before { content: ""; display: block; height: 7px; background: repeating-linear-gradient(-45deg, var(--ef-yellow) 0 12px, var(--ef-ink) 12px 24px); }
