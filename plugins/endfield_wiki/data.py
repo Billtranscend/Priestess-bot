@@ -37,6 +37,7 @@ USER_AGENT = "QQBot-EndfieldWiki/1.0 (non-commercial group bot; data from AKEDat
 TABLES = (
     "I18nTextTable_CN",
     "RichTextStyleTable",
+    "HyperlinkTextTable",
     "CharacterTable",
     "CharGrowthTable",
     "CharacterPotentialTable",
@@ -74,7 +75,7 @@ TABLES = (
     "ActivityWeeklyTaskTable",
     "ActivityWeeklyTaskMileStoneTable",
 )
-INDEX_SCHEMA = 23  # bump to force a rebuild when the index layout changes (18: leader enemies, 19: logistics skills, 20: loose equipment, 21: gacha pools, 22: 增辉 conditions, 23: game rich-text colours and term icons)
+INDEX_SCHEMA = 24  # bump to force a rebuild when the index layout changes (18: leader enemies, 19: logistics skills, 20: loose equipment, 21: gacha pools, 22: 增辉 conditions, 23: game rich-text colours and term icons, 24: <#term> styles from HyperlinkTextTable)
 EXTRA_GOAL_FILES = ("GameplayConfig/SubGameInstanceDataTable.json", "GameplayConfig/ScriptTaskExtraInfoTable.json")
 # Pool `type` of the gacha tables -> nonebot-plugin-skland's pool_type. 新手 (1) and 常驻 (2) are left out, as in its own table.
 CHAR_POOL_TYPES = {0: "special", 3: "extra", 4: "rerun"}
@@ -243,6 +244,24 @@ def rich_class(name: str) -> str:
     return "s-" + name.replace(".", "-")
 
 
+# <#term> links (法术附着, 自然脆弱…) are styled by HyperlinkTextTable: its own icon (iconPath) and the colour of a
+# RichTextStyleTable entry (richTextId); a term without richTextId is plain text in the game (消耗). Owner, 2026-11-05.
+TERM_STYLES: dict[str, dict[str, str]] = {}
+
+
+def parse_term_styles(table: dict, styles: dict[str, dict[str, str]]) -> dict[str, dict[str, str]]:
+    out = {}
+    for term, row in table.items():
+        icon = row.get("iconPath") or ""
+        out[term] = {"color": styles.get(row.get("richTextId") or "", {}).get("color", ""),
+                     "icon": icon.split("/", 1)[1] if icon.startswith("TermIcon/") else ""}
+    return out
+
+
+def term_class(name: str) -> str:
+    return "h-" + name.replace(".", "-")
+
+
 def rich_to_html(text: str) -> str:
     """Convert game rich text (<@style>..</>, <#term>..</>, \\n) to safe HTML. A battle style of the game's table is
     drawn in its colour, with its term icon in front; a term without one in the blue of skill names."""
@@ -260,8 +279,12 @@ def rich_to_html(text: str) -> str:
         else:
             kind, name = match.group(1), match.group(2)
             style = RICH_STYLES.get(name)
+            term = TERM_STYLES.get(name) if kind == "#" else None
             icon = ""
-            if "info" in name:
+            if term is not None:
+                cls = f"rt {term_class(name)}" if term["color"] or term["icon"] else "plain"
+                icon = f'<i class="ti ti-{term["icon"]}"></i>' if term["icon"] else ""
+            elif "info" in name:
                 cls = "info"
             elif "vup" in name or "num" in name:
                 cls = "up"
@@ -292,6 +315,8 @@ def build_index(table_dir: Path, version: dict, out_file: Path) -> dict[str, int
     maps = load("maps")
     RICH_STYLES.clear()
     RICH_STYLES.update(parse_rich_styles(load("RichTextStyleTable")))
+    TERM_STYLES.clear()
+    TERM_STYLES.update(parse_term_styles(load("HyperlinkTextTable"), RICH_STYLES))
 
     def text(obj: Any) -> str:
         if isinstance(obj, dict):
@@ -558,6 +583,7 @@ def build_index(table_dir: Path, version: dict, out_file: Path) -> dict[str, int
     index = {
         "schema": INDEX_SCHEMA,
         "rich_styles": dict(RICH_STYLES),
+        "rich_terms": dict(TERM_STYLES),
         "equip_sets": build_equip_sets(load, text, maps),
         "equip_items": build_equip_items(load, text, maps),
         "endgame": build_endgame(load, text, maps, table_dir),

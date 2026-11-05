@@ -163,7 +163,7 @@ def _sec(title: str, body: str, note: str = "") -> str:
 RICH_CSS = ""  # the game's text colours and term icons, set by the plugin from the index (rich_css)
 
 
-def rich_css(styles: dict[str, dict[str, str]], icons: dict[str, str]) -> str:
+def rich_css(styles: dict[str, dict[str, str]], icons: dict[str, str], terms: dict[str, dict[str, str]] | None = None) -> str:
     """Colours of the game's battle text styles and their term icons (local files), as rules for rich_to_html's classes."""
     rules = [
         ".rt { font-weight: 700; }",
@@ -176,6 +176,13 @@ def rich_css(styles: dict[str, dict[str, str]], icons: dict[str, str]) -> str:
         if style.get("color"):
             rules.append(f".{cls} {{ color: {style['color']}; }}")
         if style.get("icon") and icons.get(style["icon"]):
+            rules.append(f".ti-{style['icon']} {{ background-image: url('{icons[style['icon']]}'); }}")
+    done = {s.get("icon") for s in styles.values()}
+    for term, style in sorted((terms or {}).items()):
+        if style.get("color"):
+            rules.append(f".{data.term_class(term)} {{ color: {style['color']}; }}")
+        if style.get("icon") and style["icon"] not in done and icons.get(style["icon"]):
+            done.add(style["icon"])
             rules.append(f".ti-{style['icon']} {{ background-image: url('{icons[style['icon']]}'); }}")
     return "\n".join(rules)
 

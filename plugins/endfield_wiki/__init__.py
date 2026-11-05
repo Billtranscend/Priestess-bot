@@ -95,11 +95,11 @@ async def rich_css(index: dict) -> str:
     used by endfield_guide for its stage and enemy pages."""
     version = index.get("version", "")
     if version not in _rich_css_cache:
-        styles = index.get("rich_styles", {})
-        names = sorted({s["icon"] for s in styles.values() if s.get("icon")})
+        styles, terms = index.get("rich_styles", {}), index.get("rich_terms", {})
+        names = sorted({s["icon"] for s in [*styles.values(), *terms.values()] if s.get("icon")})
         srcs = await asyncio.gather(*(_cached_image(data.term_icon_url(n), f"term_{n}.png") for n in names))
         _rich_css_cache.clear()
-        _rich_css_cache[version] = render.rich_css(styles, dict(zip(names, srcs)))
+        _rich_css_cache[version] = render.rich_css(styles, dict(zip(names, srcs)), terms)
     return _rich_css_cache[version]
 
 
