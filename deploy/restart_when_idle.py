@@ -6,7 +6,10 @@ Reads the service journal since the current start and pairs every
 "Event will be handled by Matcher(...)" with that matcher's "running complete" / "failed" line.
 A total-count comparison is not enough: unrelated extra "complete" lines can hide one handler
 that is still running, and restarting then cuts off its reply. Also waits while the endgame
-clear collection is in progress. Restarts after two consecutive idle checks, or gives up.
+clear collection is in progress, and through the nightly Skland sign (00:05-00:50 Beijing) unless
+both sign results were already written that night: scheduled jobs leave no matcher lines, and
+restarts at 00:20 and 00:25 killed the sign twice (2026-11-03/04). Restarts after two consecutive
+idle checks, or gives up.
 """
 
 import re
@@ -14,8 +17,14 @@ import subprocess
 import sys
 import time
 from collections import Counter
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 SERVICE = "nonebot.service"
+BEIJING = timezone(timedelta(hours=8))
+SIGN_WINDOW = ((0, 5), (0, 50))  # Beijing time: the sign jobs start 00:15 and 00:20 and take about 20 minutes each
+SIGN_RESULTS = [Path(__file__).resolve().parents[1] / "cache" / "nonebot_plugin_skland" / name
+                for name in ("sign_result.json", "endfield_sign_result.json")]
 # Alconna commands (all of nonebot-plugin-skland) are announced as "AlconnaMatcherMeta(...)" but finish as "AlconnaMatcher(...)".
 STARTED = re.compile(r"Event will be handled by (\w*Matcher)(?:Meta)?(\(.*?\))\s*$")
 # "running is cancelled": a run preprocessor refused the command (e.g. the binding guard).
@@ -53,11 +62,21 @@ def busy(lines: list[str]) -> list[str]:
     return reasons
 
 
+def in_sign_window(now: datetime | None = None) -> bool:
+    """Inside the nightly sign window, and the sign not yet finished (both result files written after 00:15)."""
+    now = (now or datetime.now(BEIJING)).astimezone(BEIJING)
+    (h0, m0), (h1, m1) = SIGN_WINDOW
+    if not (now.replace(hour=h0, minute=m0, second=0, microsecond=0) <= now < now.replace(hour=h1, minute=m1, second=0, microsecond=0)):
+        return False
+    started = now.replace(hour=0, minute=15, second=0, microsecond=0).timestamp()
+    return not all(p.exists() and p.stat().st_mtime >= started for p in SIGN_RESULTS)
+
+
 def main() -> int:
     deadline = time.time() + (float(sys.argv[1]) if len(sys.argv) > 1 else 180)
     idle_checks = 0
     while time.time() < deadline:
-        reasons = busy(journal())
+        reasons = busy(journal()) + (["nightly Skland sign (00:05-00:50 Beijing) not finished"] if in_sign_window() else [])
         if reasons:
             idle_checks = 0
             print("busy:", "; ".join(r[-70:] for r in reasons), flush=True)
