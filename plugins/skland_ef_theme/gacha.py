@@ -329,7 +329,86 @@ def item_icon(item_id: str) -> str:
     return f"{AKEDATA_SPRITES}/charremoteicon/icon_{item_id}.png"
 
 
-FILTERS = {"format_timestamp_md": format_timestamp_md, "ef_charId_to_avatarUrl": item_icon}
+# A weapon pool may come without its banner (up6_image empty: 月映申领 and 细枝申领 in 1.6). The game's own
+# record page then draws it from two pieces, and so do we: its default strip (weapon-banner-background) with
+# the pool's up6_banner (a 254x254 weapon picture the content API also returns) laid on it where that page's
+# CSS puts it (left 68.98%, top -21.92%, 22.07% x 173.97% of the strip). Kept in data/skland_ef_theme/pool_art.
+CONTENT_API = "https://ef-webview.hypergryph.com/api/content"
+WEAPON_BANNER_BG = "https://web.hycdn.cn/endfield/webview/_gacha/assets/img/weapon-banner-background.108fcc.png"
+BANNER_SIZE = (1151, 146)
+POOL_ART: dict[str, str] = {}  # pool id -> data: URL of the banner
+
+
+def _art_dir() -> Path:
+    import nonebot_plugin_localstore as store
+
+    path = store.get_data_dir("skland_ef_theme") / "pool_art"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def compose_banner(background: bytes, artwork: bytes) -> bytes:
+    """The banner as the game's record page draws it."""
+    import io
+
+    from PIL import Image
+
+    w, h = BANNER_SIZE
+    strip = Image.open(io.BytesIO(background)).convert("RGBA").resize((w, h), Image.LANCZOS)
+    size = (round(w * 0.220678), round(h * 1.739726))
+    weapon = Image.open(io.BytesIO(artwork)).convert("RGBA").resize(size, Image.LANCZOS)
+    top = round(h * 0.219178)  # the picture starts this far above the strip
+    strip.alpha_composite(weapon.crop((0, top, size[0], top + h)), (round(w * 0.689835), 0))
+    out = io.BytesIO()
+    strip.save(out, "WEBP", quality=92)
+    return out.getvalue()
+
+
+async def _fetch(client, url: str, cache: Path | None = None) -> bytes:
+    if cache and cache.exists():
+        return cache.read_bytes()
+    response = await client.get(url)
+    response.raise_for_status()
+    if cache:
+        cache.with_suffix(".tmp").write_bytes(response.content)
+        cache.with_suffix(".tmp").replace(cache)
+    return response.content
+
+
+async def _pool_art(pools, server_id: str) -> None:
+    """Fill POOL_ART for the weapon pools without a banner."""
+    import base64
+
+    import httpx
+
+    wanted = [p for p in pools if not p.up6_img and p.pool_type == "weapon" and p.pool_id not in POOL_ART]
+    if not wanted:
+        return
+    folder = _art_dir()
+    async with httpx.AsyncClient(timeout=httpx.Timeout(20, connect=5), follow_redirects=True) as client:
+        for pool in wanted:
+            cached = folder / f"{pool.pool_id}.webp"
+            if not cached.exists():
+                response = await client.get(CONTENT_API, params={"pool_id": pool.pool_id, "server_id": server_id, "lang": "zh-cn"})
+                data = (response.json().get("data") or {}).get("pool") or {}
+                if data.get("up6_image"):
+                    pool.up6_img = data["up6_image"]  # published since the pool table was made
+                    continue
+                if not data.get("up6_banner"):
+                    continue
+                background = await _fetch(client, WEAPON_BANNER_BG, folder / "weapon-banner-background.png")
+                banner = await asyncio.to_thread(compose_banner, background, await _fetch(client, data["up6_banner"]))
+                cached.with_suffix(".tmp").write_bytes(banner)
+                cached.with_suffix(".tmp").replace(cached)
+                logger.info(f"Endfield pool banner drawn for {pool.pool_id} from the official up6_banner")
+            POOL_ART[pool.pool_id] = "data:image/webp;base64," + base64.b64encode(cached.read_bytes()).decode()
+
+
+def pool_art(pool_id: str) -> str:
+    return POOL_ART.get(pool_id, "")
+
+
+FILTERS = {"format_timestamp_md": format_timestamp_md, "ef_charId_to_avatarUrl": item_icon, "ef_pool_art": pool_art}
 _MEASURE = """async () => {
   await document.fonts.ready;
   const pools = [...document.querySelectorAll('.pool')].map(e => e.getBoundingClientRect().height);
@@ -426,7 +505,8 @@ def _update_requested() -> bool:
 
 async def _pool_marks(gacha_data, server_id: str) -> None:
     """UP operators / weapons of the pools that have them: local table first, the game's API otherwise."""
-    for pool in gacha_data.special_pools + gacha_data.joint_pools + gacha_data.weapon_pools + gacha_data.rerun_pools:
+    pools = gacha_data.special_pools + gacha_data.joint_pools + gacha_data.weapon_pools + gacha_data.rerun_pools
+    for pool in pools:
         local_pool = ef_gacha_pool_data.get_pool(pool.pool_id)
         if local_pool:
             pool.up_six_chars = local_pool.up_six_char_ids
@@ -440,6 +520,10 @@ async def _pool_marks(gacha_data, server_id: str) -> None:
             pool.up6_name = content.pool.up_six_display_name
         except Exception as e:
             logger.warning(f"Endfield pool metadata unavailable: {type(e).__name__}")
+    try:
+        await _pool_art(pools, server_id)
+    except Exception as e:  # the card is drawn without a banner
+        logger.warning(f"Endfield pool art unavailable: {type(e).__name__}")
 
 
 async def ef_gacha_history_handler(

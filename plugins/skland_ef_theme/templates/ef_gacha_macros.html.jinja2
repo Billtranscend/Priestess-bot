@@ -10,9 +10,11 @@
 <div class="pool">
     {# 卡池头部 #}
     {# Banner 装饰图 (1151×146 宽幅横条)；无图时不占位 #}
-    {% if pool.up6_img %}
+    {# 官方横幅缺失时按官方寻访记录页的拼法用 up6_banner 拼出（skland_ef_theme.gacha.POOL_ART） #}
+    {% set banner = pool.up6_img or (pool.pool_id | ef_pool_art) %}
+    {% if banner %}
     <div class="banner">
-        <img src="{{ pool.up6_img }}" />
+        <img src="{{ banner }}" />
     </div>
     {% endif %}
 
