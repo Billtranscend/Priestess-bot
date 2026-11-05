@@ -87,6 +87,22 @@ def _resolver() -> tuple[dict, Resolver] | None:
     return _cache["index"], _cache["resolver"]
 
 
+_rich_css_cache: dict[str, str] = {}
+
+
+async def rich_css(index: dict) -> str:
+    """CSS for the game's text colours and term icons of this index (icons cached like the other card images); also
+    used by endfield_guide for its stage and enemy pages."""
+    version = index.get("version", "")
+    if version not in _rich_css_cache:
+        styles = index.get("rich_styles", {})
+        names = sorted({s["icon"] for s in styles.values() if s.get("icon")})
+        srcs = await asyncio.gather(*(_cached_image(data.term_icon_url(n), f"term_{n}.png") for n in names))
+        _rich_css_cache.clear()
+        _rich_css_cache[version] = render.rich_css(styles, dict(zip(names, srcs)))
+    return _rich_css_cache[version]
+
+
 async def _react(emoji: str) -> None:
     with contextlib.suppress(Exception):
         await message_reaction(emoji)
@@ -186,6 +202,7 @@ async def _(state: T_State) -> None:
 
     await _react(REACTION_PROCESSING)
     try:
+        render.RICH_CSS = await rich_css(index)
         if result.kind == "weapon":
             weapon = index["weapons"][result.id]
             icon = await _cached_image(data.weapon_icon_url(weapon["icon"]), f"wpn_{weapon['icon']}.png")

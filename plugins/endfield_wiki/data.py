@@ -36,6 +36,7 @@ IMAGE_BASE = f"{DATA_BASE}/public/images/assets/beyond/dynamicassets/gameplay/ui
 USER_AGENT = "QQBot-EndfieldWiki/1.0 (non-commercial group bot; data from AKEData)"
 TABLES = (
     "I18nTextTable_CN",
+    "RichTextStyleTable",
     "CharacterTable",
     "CharGrowthTable",
     "CharacterPotentialTable",
@@ -73,7 +74,7 @@ TABLES = (
     "ActivityWeeklyTaskTable",
     "ActivityWeeklyTaskMileStoneTable",
 )
-INDEX_SCHEMA = 22  # bump to force a rebuild when the index layout changes (18: leader enemies, 19: logistics skills, 20: loose equipment, 21: gacha pools, 22: 增辉 conditions)
+INDEX_SCHEMA = 23  # bump to force a rebuild when the index layout changes (18: leader enemies, 19: logistics skills, 20: loose equipment, 21: gacha pools, 22: 增辉 conditions, 23: game rich-text colours and term icons)
 EXTRA_GOAL_FILES = ("GameplayConfig/SubGameInstanceDataTable.json", "GameplayConfig/ScriptTaskExtraInfoTable.json")
 # Pool `type` of the gacha tables -> nonebot-plugin-skland's pool_type. 新手 (1) and 常驻 (2) are left out, as in its own table.
 CHAR_POOL_TYPES = {0: "special", 3: "extra", 4: "rerun"}
@@ -219,8 +220,32 @@ def strip_live_values(text: str) -> str:
     return re.sub(r"[（(][^（）()]*\{floor:[^{}]+\}[^（）()]*[）)]", "", text)
 
 
+# The game's battle text styles (RichTextStyleTable, ba.*): a colour per tag in three variants, and for status terms
+# an icon (TermIcon/…). Filled by build_index; the cards draw them as the game does (owner, 2026-11-05).
+RICH_STYLES: dict[str, dict[str, str]] = {}
+STYLE_VARIANT = 2  # the third colour reads on a light page (电磁 #cc9900 rather than #ffcc00)
+
+
+def parse_rich_styles(table: dict) -> dict[str, dict[str, str]]:
+    out = {}
+    for tag, row in table.items():
+        if not tag.startswith("ba."):
+            continue
+        pre = row.get("preDef") or [""]
+        definition = pre[STYLE_VARIANT] if len(pre) > STYLE_VARIANT else pre[0]
+        color = re.search(r"<color=(#[0-9a-fA-F]{6})>", definition)
+        icon = re.search(r'<image="TermIcon/([^"]+)"', definition)
+        out[tag] = {"color": color.group(1).lower() if color else "", "icon": icon.group(1) if icon else ""}
+    return out
+
+
+def rich_class(name: str) -> str:
+    return "s-" + name.replace(".", "-")
+
+
 def rich_to_html(text: str) -> str:
-    """Convert game rich text (<@style>..</>, <#term>..</>, \\n) to safe HTML."""
+    """Convert game rich text (<@style>..</>, <#term>..</>, \\n) to safe HTML. A battle style of the game's table is
+    drawn in its colour, with its term icon in front; a term without one in the blue of skill names."""
     out, stack, pos = [], [], 0
     for match in re.finditer(r"<([@#])([^<>]*)>|</>|<image[^>]*>", text):
         out.append(escape(text[pos : match.start()]))
@@ -234,17 +259,22 @@ def rich_to_html(text: str) -> str:
             continue
         else:
             kind, name = match.group(1), match.group(2)
-            if kind == "#":
-                cls = "term"
-            elif "info" in name:
+            style = RICH_STYLES.get(name)
+            icon = ""
+            if "info" in name:
                 cls = "info"
             elif "vup" in name or "num" in name:
                 cls = "up"
             elif "vdown" in name:
                 cls = "down"
+            elif style and (style["color"] or style["icon"]):
+                cls = f"rt {rich_class(name)}"
+                icon = f'<i class="ti ti-{style["icon"]}"></i>' if style["icon"] else ""
+            elif kind == "#":
+                cls = "rt s-term"
             else:
                 cls = "key"
-            out.append(f'<span class="{cls}">')
+            out.append(f'<span class="{cls}">{icon}')
             stack.append(cls)
     out.append(escape(text[pos:]))
     out.extend("</span>" for _ in stack)
@@ -260,6 +290,8 @@ def build_index(table_dir: Path, version: dict, out_file: Path) -> dict[str, int
 
     i18n = load("I18nTextTable_CN")
     maps = load("maps")
+    RICH_STYLES.clear()
+    RICH_STYLES.update(parse_rich_styles(load("RichTextStyleTable")))
 
     def text(obj: Any) -> str:
         if isinstance(obj, dict):
@@ -525,6 +557,7 @@ def build_index(table_dir: Path, version: dict, out_file: Path) -> dict[str, int
 
     index = {
         "schema": INDEX_SCHEMA,
+        "rich_styles": dict(RICH_STYLES),
         "equip_sets": build_equip_sets(load, text, maps),
         "equip_items": build_equip_items(load, text, maps),
         "endgame": build_endgame(load, text, maps, table_dir),
@@ -1230,6 +1263,10 @@ def equip_icon_url(icon_id: str) -> str:
 
 def logistics_icon_url(icon_id: str) -> str:
     return f"{IMAGE_BASE}/spaceship/spaceshipskillicon/{icon_id}.png"
+
+
+def term_icon_url(icon: str) -> str:
+    return f"{IMAGE_BASE}/termicon/{icon}.png"
 
 
 def char_icon_url(char_id: str) -> str:

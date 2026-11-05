@@ -193,7 +193,7 @@ td.rs b { font-family: var(--ef-num); font-weight: 700; font-size: 17px; color: 
 .mech .desc { flex: 1; min-width: 0; font-size: 15px; line-height: 1.75; }
 .mech .sb { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--ef-line); }
 .mech .sb b { margin-right: 8px; }
-.up { font-family: var(--ef-num); font-weight: 600; font-size: 16px; padding: 0 4px; margin: 0 1px; background: var(--ef-ink); color: var(--ef-yellow); }
+.up { font-family: var(--ef-num); font-weight: 700; font-size: 16px; padding: 0 3px; margin: 0 1px; background: var(--ef-yellow); color: var(--ef-ink); }
 .down { font-weight: 700; color: var(--ef-red); }
 .key { font-weight: 700; color: var(--ef-ink); box-shadow: inset 0 -.45em 0 var(--ef-yellow); }
 .term { font-weight: 700; color: var(--ef-ink); border-bottom: 1px dashed var(--ef-ink); }
@@ -453,9 +453,12 @@ MENU_NOTES = (
 )
 
 
+RICH_CSS = ""  # the game's text colours and term icons (endfield_wiki.rich_css), set before a page is built
+
+
 def _page(theme, head: str, body: str, foot: str, notes: tuple[str, ...] = MENU_NOTES, title: str = "常用指令") -> str:
     return (
-        f'<!doctype html><html><head><meta charset="utf-8"><style>{theme.css()}{CSS % WIDTH}</style></head><body class="ef">'
+        f'<!doctype html><html><head><meta charset="utf-8"><style>{theme.css()}{CSS % WIDTH}{RICH_CSS}</style></head><body class="ef">'
         + head
         + body
         + theme.foot(foot, notes=notes, title=title)

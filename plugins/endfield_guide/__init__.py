@@ -234,10 +234,19 @@ def _cover_jobs(series: list[dict], groups: list[dict]) -> list[tuple[str, str, 
     return [stages.poster(s) for s in series] + [stages.stage_cover(g, wiki_data.stage_cover_url(g)) for g in groups]
 
 
+async def _rich_css() -> None:
+    """The game's text colours and term icons for the pages built next (same as on the wiki cards)."""
+    with contextlib.suppress(Exception):
+        loaded = wiki._resolver()
+        if loaded:
+            stages.RICH_CSS = await wiki.rich_css(loaded[0])
+
+
 async def _send_page(matcher, build, fallback: str) -> None:
     """Render and send a menu page; `build` returns its HTML. Falls back to the plain text."""
     await _react(REACTION_PROCESSING)
     try:
+        await _rich_css()
         image = await ef_theme.render_page(await build(), stages.WIDTH, height=300, template_path=wiki.DATA_DIR.as_uri())
         await UniMessage.image(raw=image).send()
     except MatcherException:
@@ -467,6 +476,7 @@ async def _(bot: Bot, event: MessageEvent, arg: Message = CommandArg()) -> None:
 
     await _react(REACTION_PROCESSING)
     try:
+        await _rich_css()
         videos, stale = await bili.videos(group["name"], BOOST.get(difficulty, ()))
         pool, _ = await _member_pool(bot, event)
         data = _load_echoes()
@@ -538,7 +548,7 @@ body { width: %dpx; padding: 24px; }
 .bd { padding: 12px 16px 14px; }
 .desc { font-size: 16px; line-height: 1.8; }
 .dim { color: var(--ef-faint); }
-.up { font-family: var(--ef-num); font-weight: 600; font-size: 17px; padding: 0 4px; margin: 0 1px; background: var(--ef-ink); color: var(--ef-yellow); }
+.up { font-family: var(--ef-num); font-weight: 700; font-size: 16px; padding: 0 3px; margin: 0 1px; background: var(--ef-yellow); color: var(--ef-ink); }
 .down { font-weight: 700; color: var(--ef-red); }
 .key { font-weight: 700; color: var(--ef-ink); box-shadow: inset 0 -.45em 0 var(--ef-yellow); }
 .term { font-weight: 700; color: var(--ef-ink); border-bottom: 1px dashed var(--ef-ink); }
@@ -651,7 +661,7 @@ async def _render(endgame, group, stage, difficulty, clears, target_text, videos
         f'{escape(difficulty)} · 推荐等级 {stage["recommend_lv"]}',
     )
     return (
-        f'<!doctype html><html><head><meta charset="utf-8"><style>{ef_theme.css()}{GUIDE_CSS % WIDTH}{stages.NOTES_CSS}</style></head><body class="ef">'
+        f'<!doctype html><html><head><meta charset="utf-8"><style>{ef_theme.css()}{GUIDE_CSS % WIDTH}{stages.NOTES_CSS}{stages.RICH_CSS}</style></head><body class="ef">'
         + ef_theme.head(f'Arknights: Endfield · {escape(group["mode"])}', escape(group["name"]), f"{tabs}{status}")
         + f"{mechanics}{enemy_block}{extra}{team_block}{video_block}"
         + ef_theme.foot(

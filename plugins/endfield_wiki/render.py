@@ -6,6 +6,7 @@ from html import escape
 
 from plugins import ef_theme
 
+from . import data
 from .data import SKILL_LEVELS
 
 WIDTH = 1400
@@ -53,7 +54,7 @@ body { width: %dpx; padding: 26px; }
 .ef-sec > h3 .ef-tag { font-weight: 400; }
 .body { padding: 12px 16px 14px; }
 .desc { font-size: 15px; line-height: 1.75; color: #2a2a27; }
-.up { font-family: var(--ef-num); font-weight: 700; font-size: 17px; color: var(--ef-ink); }
+.up { font-family: var(--ef-num); font-weight: 700; font-size: 16px; padding: 0 3px; margin: 0 1px; background: var(--ef-yellow); color: var(--ef-ink); }
 .down { font-family: var(--ef-num); font-weight: 700; font-size: 17px; color: var(--ef-red); }
 .key { font-weight: 700; color: var(--ef-ink); box-shadow: inset 0 -7px 0 var(--ef-yellow); }
 .term { color: var(--ef-ink); text-decoration: underline dotted var(--ef-ink); text-underline-offset: 3px; }
@@ -82,6 +83,18 @@ th.pt span { display: inline-block; min-width: 22px; margin-left: 4px; text-alig
   background: var(--ef-ink); color: var(--ef-yellow); }
 td b { color: var(--ef-ink); }
 table.lvs tr:last-child th, table.lvs tr:last-child td { background: var(--ef-panel-2); }
+
+/* weapon: the picture fills the left column down to the bottom, the passive levels packed (owner, 2026-11-05) */
+.wrap.wpn { align-items: stretch; }
+.wpn .side { display: flex; flex-direction: column; }
+.wpn .side > .ef-sec { flex: 1; display: flex; flex-direction: column; }
+.wpn .side .art { flex: 1; min-height: 320px; }
+.wpn .side .art img { width: 92%%; max-width: none; max-height: none; }
+.wpn .cols { display: flex; gap: 16px; align-items: flex-start; }
+.wpn .cols .stats { flex: none; width: 270px; }
+.wpn .cols .passive { flex: 1; min-width: 0; }
+.wpn .passive table.lvs td.desc { font-size: 14.5px; line-height: 1.5; padding-top: 7px; padding-bottom: 7px; }
+.wpn .passive table.lvs th.lv { vertical-align: middle; }
 
 /* equipment sets and build statistics */
 .use { padding: 8px 16px 4px; }
@@ -147,9 +160,29 @@ def _sec(title: str, body: str, note: str = "") -> str:
     return f'<div class="ef-sec"><h3>{title}{small}</h3>{body}</div>'
 
 
+RICH_CSS = ""  # the game's text colours and term icons, set by the plugin from the index (rich_css)
+
+
+def rich_css(styles: dict[str, dict[str, str]], icons: dict[str, str]) -> str:
+    """Colours of the game's battle text styles and their term icons (local files), as rules for rich_to_html's classes."""
+    rules = [
+        ".rt { font-weight: 700; }",
+        ".s-term { color: #1da6e0; }",
+        ".ti { display: inline-block; width: 1.25em; height: 1.05em; margin: 0 2px 0 1px; vertical-align: -0.15em;"
+        " background: center / contain no-repeat; }",
+    ]
+    for tag, style in sorted(styles.items()):
+        cls = data.rich_class(tag)
+        if style.get("color"):
+            rules.append(f".{cls} {{ color: {style['color']}; }}")
+        if style.get("icon") and icons.get(style["icon"]):
+            rules.append(f".ti-{style['icon']} {{ background-image: url('{icons[style['icon']]}'); }}")
+    return "\n".join(rules)
+
+
 def _page(head: str, body: str, foot: str) -> str:
     return (
-        f'<!doctype html><html><head><meta charset="utf-8"><style>{ef_theme.css()}{CSS}</style></head>'
+        f'<!doctype html><html><head><meta charset="utf-8"><style>{ef_theme.css()}{CSS}{RICH_CSS}</style></head>'
         f'<body class="ef">{head}{body}{foot}</body></html>'
     )
 
@@ -175,7 +208,7 @@ def weapon_html(weapon: dict, icon_src: str, version: str, note: str = "") -> st
         _stars(weapon["rarity"]),
     )
     body = f"""
-<div class="wrap">
+<div class="wrap wpn">
   <div class="side">
     <div class="ef-sec">
       <h3>武器信息</h3>
@@ -192,9 +225,9 @@ def weapon_html(weapon: dict, icon_src: str, version: str, note: str = "") -> st
   </div>
   <div class="main">
     <div class="mh"><b>武器数据详表</b><span>Weapon Data</span></div>
-    <div style="display:flex;gap:16px;align-items:flex-start">
-      <div style="flex:1;min-width:0">{stat_boxes}</div>
-      <div style="flex:1.6;min-width:0">{passive_box}</div>
+    <div class="cols">
+      <div class="stats">{stat_boxes}</div>
+      <div class="passive">{passive_box}</div>
     </div>
   </div>
 </div>"""
