@@ -106,7 +106,8 @@ collect_now = on_command("攻略数据更新", rule=strict, permission=SUPERUSER
 speed_refresh = on_command("竞速更新", aliases={"更新竞速"}, rule=strict, priority=5, block=True)
 REFRESH_COOLDOWN = 300  # seconds between one member's /竞速更新
 REFRESH_LISTED = 8  # faster clears named in the answer
-_refreshed: dict[str, float] = {}  # qq -> monotonic time of their last /竞速更新
+_refreshed: dict[str, float] = {}  # qq -> monotonic time of their last successful /竞速更新 (or of one still running)
+_refreshing: set[str] = set()  # members whose /竞速更新 is running
 
 
 async def _react(emoji: str) -> None:
@@ -455,9 +456,13 @@ async def _(event: MessageEvent, arg: Message = CommandArg()) -> None:
 @speed_refresh.handle()
 async def _(event: MessageEvent) -> None:
     qq = str(event.user_id)
-    wait = REFRESH_COOLDOWN - (time.monotonic() - _refreshed.get(qq, -REFRESH_COOLDOWN))
-    if wait > 0:
-        await speed_refresh.finish(f"刚更新过，{int(wait // 60) + 1} 分钟后可以再更新", at_sender=True)
+    since = time.monotonic() - _refreshed.get(qq, -REFRESH_COOLDOWN)
+    if since < REFRESH_COOLDOWN:
+        ago = "刚刚" if since < 10 else f"{int(since)} 秒前" if since < 60 else f"{int(since // 60)} 分钟前"
+        if qq in _refreshing:
+            await speed_refresh.finish("正在更新你的记录，请稍等", at_sender=True)
+        await speed_refresh.finish(f"你 {ago}已更新成功，成绩已在榜上；{int(REFRESH_COOLDOWN // 60)} 分钟内不用重复更新", at_sender=True)
+    _refreshing.add(qq)
     _refreshed[qq] = time.monotonic()
     await _react(REACTION_PROCESSING)
     try:
@@ -465,9 +470,12 @@ async def _(event: MessageEvent) -> None:
     except Exception as e:
         logger.warning(f"Speed refresh failed: {type(e).__name__}")
         outcome, before, after = "failed", {}, {}
-    if outcome != "ok":
-        if outcome in ("busy", "failed"):
-            _refreshed.pop(qq, None)  # nothing was fetched: may try again at once
+    finally:
+        _refreshing.discard(qq)
+    if outcome == "ok":
+        _refreshed[qq] = time.monotonic()  # the cooldown counts from the finished update
+    else:
+        _refreshed.pop(qq, None)  # nothing was updated: may try again at once
         await _react(REACTION_FAIL)
         await speed_refresh.finish({
             "busy": "全员战绩正在更新中，结束后榜单就会包含你的最新记录，不用再发",
