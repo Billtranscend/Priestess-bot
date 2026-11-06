@@ -97,6 +97,7 @@ img { display: block; }
 .stat .kv > div { flex: 1 1 0; }
 .stat .kv b { display: block; font-family: var(--ef-num); font-weight: 700; font-size: 20px; line-height: 1.1; white-space: nowrap; }
 .stat .kv b i { font-style: normal; color: var(--ef-faint); margin: 0 2px; }
+.stat .upnote { margin-top: 5px; font-size: 10px; line-height: 1.35; color: var(--ef-sub); }
 .stat .kv small { display: block; font-size: 11px; color: var(--ef-sub); white-space: nowrap; }
 .six { display: inline-block; background: var(--ef-yellow); padding: 0 4px; }
 .spook { color: var(--ef-red); }
@@ -313,6 +314,8 @@ img { display: block; }
                             <small>UP平均</small>
                         </div>
                     </div>
+                    {# 口径说明（owner 2026-11-06）：旧池抽了没出 UP 的抽数也算成本，小黑盒不算 #}
+                    {% if record.weapon_up_count > 0 %}<div class="upnote">UP平均含旧池未出 UP 的抽数，与小黑盒口径不同</div>{% endif %}
                     {# 武器池保底进度条 #}
                     <div class="pity-meter">
                         <div class="pl">
