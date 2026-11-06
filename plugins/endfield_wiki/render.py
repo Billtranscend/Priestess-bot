@@ -117,6 +117,13 @@ table.lvs tr:last-child th, table.lvs tr:last-child td { background: var(--ef-pa
 .lineup span i { font-style: normal; font-family: var(--ef-cjk); font-weight: 400; font-size: 13px; color: var(--ef-sub); margin-left: 3px; }
 h3 + .typ { border-top: 0; }
 .typ .use { padding: 0; }
+.typ .grp { display: flex; align-items: baseline; gap: 8px; padding: 2px 0 6px; }
+.typ .grp b { font-size: 18px; font-weight: 900; padding: 0 6px; background: var(--ef-dark); color: #f4f4f0; }
+.typ .grp span { margin-left: auto; font-family: var(--ef-num); font-weight: 700; font-size: 17px; }
+.typ .grp span i { font-style: normal; font-family: var(--ef-cjk); font-weight: 400; font-size: 13px; color: var(--ef-sub); margin-left: 3px; }
+.typ .few { padding: 2px 0 8px; font-size: 15px; color: var(--ef-sub); }
+.typ .lo { padding: 4px 0 2px; font-size: 14px; color: var(--ef-sub); }
+.typ .lo b { font-family: var(--ef-num); font-size: 17px; color: var(--ef-ink); }
 .typ .use .row b { font-size: 17px; }
 .typ .pc { display: flex; gap: 10px; align-items: flex-start; padding: 7px 0; border-top: 1px dashed var(--ef-line-2); }
 .typ .pc:first-of-type { border-top: 0; }
@@ -254,39 +261,59 @@ def _usage_rows(rows: list[tuple[str, int, int]], unit: str) -> str:
 REFINE_MARGIN = 0.1  # attributes within this of a piece's most refined one are marked as the ones members go for
 
 
-def _builds_box(builds: dict | None, min_sample: int, pieces: dict[str, dict]) -> str:
+def _piece_rows(build: dict, pieces: dict[str, dict]) -> tuple[str, bool]:
+    """The pieces of one loadout with their refinement chips; (html, whether any chips were drawn)."""
+    html, refined = "", False
+    for piece in build["pieces"]:
+        info = pieces.get(piece["name"], {})
+        icon = f'<img src="{escape(info["src"])}">' if info.get("src") else '<div class="ph"></div>'
+        chips = ""
+        if piece.get("refine") and info.get("attrs"):  # loose pieces have two attributes, set pieces three
+            refined = True
+            levels = piece["refine"][: len(info["attrs"])]
+            chips = '<div class="rf">' + "".join(
+                f'<span{" class=hot" if level >= 1 and level >= max(levels) - REFINE_MARGIN else ""}>{escape(attr)}<em>{level:.1f}</em></span>'
+                for attr, level in zip(info["attrs"], levels)
+            ) + "</div>"
+        html += f'<div class="pc">{icon}<div><b>{escape(piece["name"])}</b><small>{escape(piece["slot"])}</small>{chips}</div></div>'
+    return html, refined
+
+
+def _builds_box(builds: dict | None, min_sample: int, pieces: dict[str, dict], by_potential: bool = False) -> str:
     """What bound members run on this operator; there is no official recommendation in the game data.
 
-    One block per set, most used first: its share, then the piece members most often wear in each slot. A set
-    after the first that fewer than `min_sample` members run keeps its share only.
+    by_potential (6-star operators): one block per potential group (endfield_guide.builds.POTENTIAL_GROUPS), the
+    group's most used set; a group of fewer than `min_sample` members says so. Otherwise the most used sets, the
+    first always with its loadout, a later one with it only when `min_sample` members run that set.
+    Each loadout is the whole one most members wear in that set.
     `pieces` maps a piece name to {"src": icon, "attrs": [attribute names]} for the pieces listed.
     """
-    if not builds or builds["n"] < min_sample:
+    blocks_of = (builds or {}).get("by_potential" if by_potential else "builds") or []
+    total = sum(block["n"] for block in blocks_of) if by_potential else (builds or {}).get("n", 0)
+    if total < min_sample:
         body = f'<div class="hint">已成套的群友不足 {min_sample} 人，暂无统计。</div>'
         return _sec("群友配装", body)
     blocks, refined = "", False
-    for rank, build in enumerate(builds["builds"]):
-        typical = ""
-        for piece in build["pieces"] if rank == 0 or build["count"] >= min_sample else ():
-            info = pieces.get(piece["name"], {})
-            icon = f'<img src="{escape(info["src"])}">' if info.get("src") else '<div class="ph"></div>'
-            chips = ""
-            if piece.get("refine") and info.get("attrs"):  # loose pieces have two attributes, set pieces three
-                refined = True
-                levels = piece["refine"][: len(info["attrs"])]
-                chips = '<div class="rf">' + "".join(
-                    f'<span{" class=hot" if level >= 1 and level >= max(levels) - REFINE_MARGIN else ""}>{escape(attr)}<em>{level:.1f}</em></span>'
-                    for attr, level in zip(info["attrs"], levels)
-                ) + "</div>"
-            typical += f'<div class="pc">{icon}<div><b>{escape(piece["name"])}</b><small>{escape(piece["slot"])}</small>{chips}</div></div>'
-        share = _usage_rows([(build["set"], build["count"], builds["n"])], "人")
-        blocks += f'<div class="typ"><div class="use">{share}</div>{typical}</div>'
-    refine_hint = "词条后的数字是穿这件装备的群友对该词条的平均精锻次数（满 3 次），黄底是这件装备上群友精锻最多的词条。" if refined else ""
+    for rank, build in enumerate(blocks_of):
+        head = f'<div class="grp"><b>{escape(build["group"])}</b><span>{build["n"]}<i>人</i></span></div>' if by_potential else ""
+        if by_potential and (build["n"] < min_sample or not build.get("set")):
+            blocks += f'<div class="typ">{head}<div class="few">不足 {min_sample} 人，暂无统计</div></div>'
+            continue
+        share = _usage_rows([(build["set"], build["set_count"], build["n"])], "人")
+        detail = ""
+        if by_potential or rank == 0 or build["set_count"] >= min_sample:
+            rows, chips = _piece_rows(build, pieces)
+            refined = refined or chips
+            detail = f'<div class="lo">这套完整配装 <b>{build["count"]}</b> 人在穿</div>{rows}'
+        blocks += f'<div class="typ">{head}<div class="use">{share}</div>{detail}</div>'
+    refine_hint = "词条后的数字是这样穿的群友对该词条的平均精锻次数（满 3 次），黄底是这件装备上群友精锻最多的词条。" if refined else ""
+    how = ("按干员潜能分两组，每组是用得最多的套装，以及该套装下最多群友穿的完整配装（4 件一起算）。" if by_potential
+           else "每个套装下面是穿这套的群友里最多人穿的完整配装（4 件一起算）。")
     body = (
         f"{blocks}"
-        f'<div class="hint">每个套装下面是穿这套的群友在各部位最常用的装备。{refine_hint}统计自已绑定群友 Lv70 以上、已凑齐 3 件套的该干员，每天更新；不是官方推荐。发送 /套装名 查看套装详情。</div>'
+        f'<div class="hint">{how}{refine_hint}统计自已绑定群友 Lv70 以上、已凑齐 3 件套的该干员，每天更新；不是官方推荐。发送 /套装名 查看套装详情。</div>'
     )
-    return _sec("群友配装", body, f'{builds["n"]} 人已成套')
+    return _sec("群友配装", body, f"{total} 人已成套")
 
 
 TEAM_MIN = 3  # members; fewer say nothing
@@ -456,7 +483,7 @@ def operator_html(
       <h3>Lv90 基础属性</h3>
       <div class="tiles">{stats}</div>
     </div>
-    {_builds_box(builds, min_sample, pieces or {})}
+    {_builds_box(builds, min_sample, pieces or {}, op.get("rarity") == 6)}
     {_partners_box(team, mates or {}, op["id"], icon_src)}
   </div>
   <div class="main">

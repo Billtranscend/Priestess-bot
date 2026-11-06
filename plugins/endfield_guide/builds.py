@@ -2,10 +2,15 @@
 
 The game has no table of recommended equipment, so the cards show what members actually run.
 Once a day the collection (echoes.EchoStore.collect) also reads each member's Skland card and
-keeps, per operator at MIN_LEVEL or above, the four equipped pieces, their sets and how far each
-of a piece's three attributes was refined (精锻). Only aggregates are shown: how many members run
-which set on an operator, the most common piece per slot for each of the most used sets, and the
-average refinement of each attribute on that piece. Members who opted out of the statistics are neither fetched nor counted.
+keeps, per operator at MIN_LEVEL or above, its potential, the four equipped pieces, their sets and how far each
+of a piece's three attributes was refined (精锻). Only aggregates are shown. Each set is shown with the whole loadout
+members most often wear in it (four pieces worn together, so it is one somebody actually wears; per-slot favourites
+could combine into a loadout nobody wears) and the average refinement of each attribute on those pieces.
+6-star operators are shown per potential group (POTENTIAL_GROUPS, owner 2026-11-06: low-potential members often
+fill a set to four pieces, high-potential ones swap one for a better main attribute), the group's most used set
+each; the others, whose potential is mostly full anyway, by their TOP_SETS most used sets. Both are computed here,
+the wiki card picks by rarity. Snapshots from before the potential was kept take it from the member's roster when
+the member has a single role (the roster of the equipped role is not marked otherwise).
 The same card lists every operator a role owns with its potential: a member's `rosters` hold one per role of every
 bound account (the equipment above stays the default role's), for /zmd持有率. Roles below HOLDING_MIN_LEVEL are kept but
 not counted: they are mostly members who only tried Endfield and play Arknights (checked 2026-10-31).
@@ -26,11 +31,13 @@ MIN_SAMPLE = 3  # fewer builds than this say nothing
 TOP_SETS = 3  # sets listed per operator, most used first
 REFINE_SLOTS = 3  # attributes per piece; each is refined 0-3 times
 BUILD_SCHEMA = 5  # 2: refinement levels per piece, 3: roster of owned operators, 4: one roster per role of every account, 5: with the role's level
+# (an operator's "pot" was added later without a new schema: older snapshots fall back to the roster, see _potential)
+POTENTIAL_GROUPS = (("0-3 潜", 0, 3), ("4 潜以上", 4, 5))  # (label, lowest, highest potential)
 HOLDING_MIN_LEVEL = 30  # 权限等级, the owner's choice
 
 
 def extract(detail: dict) -> dict[str, dict]:
-    """Operator name -> {"lv", "equips": [[piece, set, [refine level x3]] | None per slot]} from a card's `detail`."""
+    """Operator name -> {"lv", "pot", "equips": [[piece, set, [refine level x3]] | None per slot]} from a card's `detail`."""
     chars: dict[str, dict] = {}
     for char in detail.get("chars") or []:
         name, level = (char.get("charData") or {}).get("name"), int(char.get("level") or 0)
@@ -43,7 +50,7 @@ def extract(detail: dict) -> dict[str, dict]:
             refine = [int(enhance.get(str(index)) or 0) for index in range(1, REFINE_SLOTS + 1)]
             equips.append([data["name"], (data.get("suit") or {}).get("name") or "", refine] if data.get("name") else None)
         if any(equips):
-            chars[name] = {"lv": level, "equips": equips}
+            chars[name] = {"lv": level, "pot": int(char.get("potentialLevel") or 0), "equips": equips}
     return chars
 
 
@@ -78,14 +85,48 @@ def holdings(members: dict, exclude: set[str] = frozenset()) -> tuple[int, dict[
     return len(rosters), {name: (len(levels), sum(levels) / len(levels)) for name, levels in owners.items()}
 
 
-def aggregate(members: dict, exclude: set[str] = frozenset()) -> dict:
-    """{"operators": {name: {n, builds}}, "sets": {name: {n, operators}}} over builds with an active set.
+def _potential(member: dict, name: str, build: dict) -> int | None:
+    """The operator's potential in this snapshot; None when it cannot be told."""
+    if "pot" in build:
+        return int(build["pot"])
+    rosters = member.get("rosters") or {}
+    if len(rosters) == 1:
+        owned = next(iter(rosters.values())).get("owned") or {}
+        if name in owned:
+            return int(owned[name])
+    return None
 
-    An operator's `builds` are its TOP_SETS most used sets: {"set", "count", "pieces": the most common piece per slot}.
+
+def _set_block(rows: list[tuple], suit: str, out_of: int) -> dict:
+    """{"set", "set_count", "n": out_of, "count", "pieces"} for the most common whole loadout of `suit` among `rows` (potential, set, loadout, equips)."""
+    in_set = [row for row in rows if row[1] == suit]
+    loadouts = Counter(row[2] for row in in_set)
+    # most worn; on a tie the loadout with more pieces filled
+    loadout, count = max(loadouts.items(), key=lambda item: (item[1], sum(bool(n) for n in (item[0][0], item[0][1], *item[0][2]))))
+    refines: dict[str, list[list[int]]] = {}
+    for row in in_set:
+        if row[2] == loadout:
+            for equip in row[3]:
+                if equip and len(equip) > 2:  # snapshots older than BUILD_SCHEMA 2 carry no refinement
+                    refines.setdefault(equip[0], []).append(equip[2])
+    pieces = []
+    for slot, piece in ((SLOT_LABELS[0], loadout[0]), (SLOT_LABELS[1], loadout[1]), *((SLOT_LABELS[2], n) for n in loadout[2])):
+        if piece:
+            worn = refines.get(piece) or []
+            average = [round(sum(levels[i] for levels in worn) / len(worn), 1) for i in range(REFINE_SLOTS)] if worn else None
+            pieces.append({"slot": slot, "name": piece, "refine": average})
+    return {"set": suit, "set_count": len(in_set), "n": out_of, "count": count, "pieces": pieces}
+
+
+def aggregate(members: dict, exclude: set[str] = frozenset()) -> dict:
+    """{"operators": {name: {n, builds, by_potential}}, "sets": {name: {n, operators}}} over builds with an active set.
+
+    `builds`: the operator's TOP_SETS most used sets over all its `n` builds, each a _set_block.
+    `by_potential`: one entry per POTENTIAL_GROUPS group, {"group", "n": the group's builds} plus, when it has any,
+    the _set_block of its most used set; only builds whose potential is known are in a group.
     """
-    by_operator: dict[str, dict] = {}
+    rows_of: dict[str, list[tuple]] = {}  # operator -> [(potential or None, set, loadout, equips)]
     by_set: dict[str, Counter] = {}
-    refines: dict[tuple[str, str], list[list[int]]] = {}  # (operator, piece) -> refinement levels of every copy worn
     for qq, member in members.items():
         if qq in exclude:
             continue
@@ -94,35 +135,23 @@ def aggregate(members: dict, exclude: set[str] = frozenset()) -> dict:
             active = next((s for s, count in suits.most_common(1) if count >= SET_PIECES), None)
             if active is None:
                 continue
-            entry = by_operator.setdefault(name, {"n": 0, "sets": Counter(), "pieces": {}})
-            entry["n"] += 1
-            entry["sets"][active] += 1
             by_set.setdefault(active, Counter())[name] += 1
-            body, arm, accessories = entry["pieces"].setdefault(active, [Counter() for _ in SLOT_LABELS])
             names = [equip[0] if equip else "" for equip in build["equips"]]
-            body[names[0]] += bool(names[0])
-            arm[names[1]] += bool(names[1])
-            accessories[tuple(sorted(n for n in names[2:] if n))] += 1
-            for equip in build["equips"]:
-                if equip and len(equip) > 2:  # snapshots older than BUILD_SCHEMA 2 carry no refinement
-                    refines.setdefault((name, equip[0]), []).append(equip[2])
+            loadout = (names[0], names[1], tuple(sorted(n for n in names[2:] if n)))
+            rows_of.setdefault(name, []).append((_potential(member, name, build), active, loadout, build["equips"]))
     operators = {}
-    for name, entry in by_operator.items():
-        common = []
-        for suit, wearers in entry["sets"].most_common(TOP_SETS):
-            body, arm, accessories = entry["pieces"][suit]
-            typical = [(label, *counter.most_common(1)[0]) for label, counter in ((SLOT_LABELS[0], +body), (SLOT_LABELS[1], +arm)) if counter]
-            pair, count = accessories.most_common(1)[0]
-            typical += [(SLOT_LABELS[2], piece, count) for piece in pair]
-            pieces = []
-            for slot, piece, count in typical:
-                worn = refines.get((name, piece)) or []
-                average = [round(sum(levels[i] for levels in worn) / len(worn), 1) for i in range(REFINE_SLOTS)] if worn else None
-                pieces.append({"slot": slot, "name": piece, "count": count, "refine": average})
-            common.append({"set": suit, "count": wearers, "pieces": pieces})
-        operators[name] = {"n": entry["n"], "builds": common}
+    for name, rows in rows_of.items():
+        top = [_set_block(rows, suit, len(rows)) for suit, _ in Counter(row[1] for row in rows).most_common(TOP_SETS)]
+        groups = []
+        for label, low, high in POTENTIAL_GROUPS:
+            group = [row for row in rows if row[0] is not None and low <= row[0] <= high]
+            block = {"group": label, "n": len(group)}
+            if group:
+                block.update(_set_block(group, Counter(row[1] for row in group).most_common(1)[0][0], len(group)))
+            groups.append(block)
+        operators[name] = {"n": len(rows), "builds": top, "by_potential": groups}
     sets = {
-        name: {"n": sum(counter.values()), "operators": [(op, count, by_operator[op]["n"]) for op, count in counter.most_common(8)]}
+        name: {"n": sum(counter.values()), "operators": [(op, count, len(rows_of[op])) for op, count in counter.most_common(8)]}
         for name, counter in by_set.items()
     }
     return {"operators": operators, "sets": sets}
