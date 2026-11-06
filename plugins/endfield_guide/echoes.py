@@ -94,6 +94,31 @@ class EchoStore:
             if data["members"].pop(qq, None) is not None:
                 self._save(data)
 
+    async def refresh(self, qq: str) -> tuple[str, dict, dict]:
+        """One member's clears now (/竞速更新), as the collection fetches them: (outcome, records before, after).
+
+        outcome: "ok"; "busy" while a collection holds the store; "optout"; "unbound" (no QQ bind or no default
+        Endfield role); "failed" (Skland refused or did not answer). Only "ok" writes the store, so a failure
+        keeps the member's previous records, unlike in the collection, where failing members are dropped.
+        """
+        if self.lock.locked():
+            return "busy", {}, {}
+        async with self.lock:
+            if qq in self.optout():
+                return "optout", {}, {}
+            data, stats = self.load(), Counter()
+            before = dict((data["members"].get(qq) or {}).get("records") or {})
+            async with get_session(expire_on_commit=False, autoflush=False) as session:
+                bind_id = (await session.execute(select(Bind.bind_id).where(Bind.platform == "QQClient", Bind.platform_id == qq))).scalar()
+                if bind_id is None or await default_role(session, bind_id) is None:
+                    return "unbound", before, {}
+                await self._member(session, qq, bind_id, data, stats, set(), None, {}, True)
+            if not stats["ok"]:
+                return "failed", before, {}
+            data["schema"] = ECHO_SCHEMA
+            self._save(data)
+            return "ok", before, dict(data["members"][qq]["records"])
+
     async def collect(self, builds: BuildStore | None = None, clears: bool = True) -> dict[str, int]:
         """Fetch every bound, non-opted-out member once; returns counters for logging.
 

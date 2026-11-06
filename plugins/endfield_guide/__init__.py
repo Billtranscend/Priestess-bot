@@ -6,6 +6,9 @@
 /敌人 <关卡|丰碑> [难度]   mechanics and enemy attributes, no teams or videos (/回响敌人: this week's rotation, /丰碑敌人: the current series)
 /攻略统计 退出|加入        opt out of / back into the group clear-team statistics
 /竞速榜                   menu → /回响竞速 [关卡]  /丰碑竞速 [丰碑|关卡]
+/竞速更新                 fetch the sender's own 战争回响 / 影拓丰碑 clears now, so the boards show them at once
+                          (owner 2026-11-06: members refresh themselves instead of waiting for the collection);
+                          once per REFRESH_COOLDOWN per member, not while the collection runs
 /zmd持有率                share of bound roles (every account, 权限等级 30+) owning each 6-star operator, with the owners' average potential
 
 Stage data comes from the endfield_wiki AKEData index; clear teams from members'
@@ -100,6 +103,10 @@ monument_speed = on_command("丰碑竞速", aliases={"影拓丰碑竞速"}, rule
 usage_board = on_command("榜单角色出场率", aliases={"角色出场率"}, rule=strict, priority=5, block=True)
 holding_board = on_command("zmd持有率", aliases={"终末地持有率", "干员持有率", "持有率"}, rule=strict, priority=5, block=True)
 collect_now = on_command("攻略数据更新", rule=strict, permission=SUPERUSER, priority=5, block=True)
+speed_refresh = on_command("竞速更新", aliases={"更新竞速"}, rule=strict, priority=5, block=True)
+REFRESH_COOLDOWN = 300  # seconds between one member's /竞速更新
+REFRESH_LISTED = 8  # faster clears named in the answer
+_refreshed: dict[str, float] = {}  # qq -> monotonic time of their last /竞速更新
 
 
 async def _react(emoji: str) -> None:
@@ -443,6 +450,45 @@ async def _(event: MessageEvent, arg: Message = CommandArg()) -> None:
     echo_store.set_optout(str(event.user_id), action == "退出")
     await _react(REACTION_DONE)
     await stats_opt.finish("已退出统计，你的记录不会再被收集，也不会出现在竞速榜上" if action == "退出" else "已重新加入通关阵容统计，下次更新后生效", at_sender=True)
+
+
+@speed_refresh.handle()
+async def _(event: MessageEvent) -> None:
+    qq = str(event.user_id)
+    wait = REFRESH_COOLDOWN - (time.monotonic() - _refreshed.get(qq, -REFRESH_COOLDOWN))
+    if wait > 0:
+        await speed_refresh.finish(f"刚更新过，{int(wait // 60) + 1} 分钟后可以再更新", at_sender=True)
+    _refreshed[qq] = time.monotonic()
+    await _react(REACTION_PROCESSING)
+    try:
+        outcome, before, after = await echo_store.refresh(qq)
+    except Exception as e:
+        logger.warning(f"Speed refresh failed: {type(e).__name__}")
+        outcome, before, after = "failed", {}, {}
+    if outcome != "ok":
+        if outcome in ("busy", "failed"):
+            _refreshed.pop(qq, None)  # nothing was fetched: may try again at once
+        await _react(REACTION_FAIL)
+        await speed_refresh.finish({
+            "busy": "全员战绩正在更新中，结束后榜单就会包含你的最新记录，不用再发",
+            "optout": "你已退出攻略统计，记录不会被收集。发 /攻略统计 加入 重新加入后再更新",
+            "unbound": "还没有绑定森空岛的终末地角色，绑定后才能更新竞速记录",
+            "failed": "森空岛暂时没有返回你的战绩，请稍后再试",
+        }[outcome], at_sender=True)
+    faster = [(key, before[key]["time"], record["time"]) for key, record in after.items() if key in before and record.get("time") is not None and before[key].get("time") is not None and record["time"] < before[key]["time"]]
+    fresh = [key for key in after if key not in before]
+    lines = [f"竞速记录已更新，共 {len(after)} 条通关记录，榜单已同步"]
+    if faster:
+        lines.append(f"{len(faster)} 关成绩变快：")
+        lines += [f"{key.replace('|', ' ')}  {_fmt_time(old)} → {_fmt_time(new)}" for key, old, new in faster[:REFRESH_LISTED]]
+        if len(faster) > REFRESH_LISTED:
+            lines.append(f"……另有 {len(faster) - REFRESH_LISTED} 关")
+    if fresh:
+        lines.append(f"新增 {len(fresh)} 关通关记录")
+    if not faster and not fresh:
+        lines.append("没有比上次更快的成绩")
+    await _react(REACTION_DONE)
+    await speed_refresh.finish("\n".join(lines), at_sender=True)
 
 
 @collect_now.handle()
