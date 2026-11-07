@@ -15,6 +15,13 @@ A small index is kept on disk: the game part is rebuilt when the repository's ve
 the wiki part about once an hour. With the game part go the weekly items for /本周任务 and the weekly
 report (`weekly`): the weekly missions (mission_table), the annihilation rotation (campaign_table, stage
 names from stage_table) and the 保全派驻 seasons (climb_tower_table).
+
+Modes that run for a year (集成战略, 生息演算, 卫戍协议·规程 ...) are left out, except while they are
+new: the week before they open and NEW_MODE after (owner, 2026-11-07, 卫戍协议·规程 was missing). They are
+found by their length alone, so the next such mode needs nothing by hand.
+Some activities have no wiki entry of their own and so no banner (幸运墙, 特别招募 ...). For those,
+data/game_calendar/arknights_banners.json {"<game activity id>": "<PRTS file name>"} names the
+announcement picture by hand; those pictures are looked up with the wiki's.
 """
 
 from __future__ import annotations
@@ -50,6 +57,7 @@ USER_AGENT = "QQBot-GameCalendar/1.0 (non-commercial QQ group bot; activity cale
 KEEP_ENDED = 30 * 86400  # activities that ended longer ago are not kept
 MAX_AGE = 12 * 3600  # rebuild at least this often: pool details appear independently of the game version
 PERMANENT = 180 * 86400  # pools running longer than this (归航寻访 ...) are not time-limited
+NEW_MODE = 7 * 86400  # a year-long mode is kept this long after it opened (the calendar shows it a week before and after)
 GENERIC_POOL_NAME = "适合多种场合的强力干员"
 # Activity type prefixes -> kind label.
 KINDS = (
@@ -65,17 +73,20 @@ POOL_KINDS = (
 )
 
 
-def _kind(activity_type: str, replicate: bool) -> str:
+def _kind(activity_type: str, replicate: bool, activity_id: str = "") -> str:
     label = next((label for prefix, label in KINDS if activity_type.startswith(prefix)), "")
+    if not label and "autochess" in activity_id:  # 卫戍协议 rows carry type DEFAULT
+        label = "卫戍协议"
     return f"{label}·复刻" if replicate and label == "活动" else label
 
 
 def build(activity_table: dict, gacha_table: dict, pool_details: dict | None, names: dict[str, str], now: float) -> tuple[list[dict], list[dict]]:
     """(activities, pools) from the game tables: what is running, about to start, or ended recently."""
     activities = [
-        {"id": row["id"], "name": row["name"], "kind": _kind(row.get("type", ""), bool(row.get("isReplicate"))), "start": row["startTime"], "end": row["endTime"]}
+        {"id": row["id"], "name": row["name"], "kind": _kind(row.get("type", ""), bool(row.get("isReplicate")), row["id"]), "start": row["startTime"], "end": row["endTime"]}
         for row in (activity_table.get("basicInfo") or {}).values()
         if row.get("name") and row.get("startTime") and row.get("endTime", 0) > now - KEEP_ENDED
+        and (row["endTime"] - row["startTime"] <= PERMANENT or row["startTime"] >= now - NEW_MODE)
     ]
     up = {}
     for pool in (pool_details or {}).get("gachaPoolClient") or []:
@@ -93,7 +104,7 @@ def build(activity_table: dict, gacha_table: dict, pool_details: dict | None, na
     return sorted(activities, key=lambda a: a["start"]), sorted(pools, key=lambda p: p["start"])
 
 
-def parse_wiki(answer: dict) -> list[dict]:
+def parse_wiki(answer: dict, now: float | None = None) -> list[dict]:
     """Activities from a Semantic MediaWiki `ask` answer; the printout timestamps are unix seconds."""
     activities = []
     for row in ((answer.get("query") or {}).get("results") or {}).values():
@@ -107,7 +118,8 @@ def parse_wiki(answer: dict) -> list[dict]:
         kind = next((label for keyword, label in WIKI_KINDS if keyword in categories), "")
         banner = (printouts.get("标题图文件名") or [""])[0]
         banner = banner if isinstance(banner, str) else banner.get("fulltext", "")
-        if end - start <= PERMANENT:  # 集成战略 / 生息演算 run for a year: modes, not limited-time activities
+        # 集成战略 / 生息演算 / 卫戍协议·规程 run for a year: modes, shown only while new
+        if end - start <= PERMANENT or (now is not None and start >= now - NEW_MODE):
             activities.append({"name": name, "short": (printouts.get("名称缩短") or [name])[0], "kind": kind, "start": start, "end": end, "banner_file": banner, "image": ""})
     return sorted(activities, key=lambda a: a["start"])
 
@@ -157,10 +169,11 @@ def pool_images(game_pools: list[dict], wiki_pools: list[dict]) -> dict[str, str
 
 
 def _plain(name: str) -> str:
-    return "".join(ch for ch in name if ch.isalnum()).lower()
+    """A name for comparing: letters only, so 感谢庆典2026限时签到活动 (wiki) still finds 感谢庆典限时签到 (tables)."""
+    return "".join(ch for ch in name if ch.isalnum() and not ch.isdigit()).lower()
 
 
-def merge(game: list[dict], wiki: list[dict]) -> list[dict]:
+def merge(game: list[dict], wiki: list[dict], extra_images: dict[str, str] | None = None) -> list[dict]:
     """Game activities plus the announced ones only the wiki has.
 
     The same activity is recognised by its name and an opening on the same day, or by identical
@@ -187,6 +200,9 @@ def merge(game: list[dict], wiki: list[dict]) -> list[dict]:
             merged.append(
                 {"id": "", "name": entry["name"], "kind": entry["kind"], "start": entry["start"], "end": entry["end"], "aliases": [entry["short"]], "alt_starts": [], "image": entry.get("image", "")}
             )
+    for activity in merged:  # banners named by hand for activities the wiki has no entry for
+        if not activity["image"] and activity.get("id") in (extra_images or {}):
+            activity["image"] = extra_images[activity["id"]]
     return sorted(merged, key=lambda a: a["start"])
 
 
@@ -236,10 +252,22 @@ def _operator_names(character_table: Path) -> dict[str, str]:
         return {}
 
 
+def _hand_banners(cache_file: Path) -> dict[str, str]:
+    """Game activity id -> PRTS file name, from arknights_banners.json next to the index."""
+    try:
+        data = json.loads((cache_file.parent / "arknights_banners.json").read_text("utf-8"))
+        return {str(k): str(v) for k, v in data.items() if v}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
 async def refresh(cache_file: Path, character_table: Path) -> str:
     """Bring the index up to date. Returns what happened ("unchanged" when nothing did)."""
     cached = load(cache_file)
     now, done = time.time(), []
+    hand = _hand_banners(cache_file)
+    if hand != (cached.get("wiki") or {}).get("hand_banners", {}):
+        cached.setdefault("wiki", {})["fetched"] = 0  # a changed list is looked up at once
     async with httpx.AsyncClient(timeout=httpx.Timeout(90, connect=20), follow_redirects=True, headers={"User-Agent": USER_AGENT}) as client:
         response = await client.get(VERSION_URL)
         response.raise_for_status()
@@ -279,7 +307,7 @@ async def refresh(cache_file: Path, character_table: Path) -> str:
                     async with httpx.AsyncClient(timeout=WIKI_TIMEOUT, headers={"User-Agent": USER_AGENT}) as wiki_client:
                         response = await wiki_client.get(WIKI_API, params={"action": "ask", "query": WIKI_QUERY.format(since=since), "format": "json"})
                         response.raise_for_status()
-                        found = parse_wiki(response.json())
+                        found = parse_wiki(response.json(), now)
                         if titles := banner_titles(found):
                             response = await wiki_client.get(
                                 WIKI_API,
@@ -297,7 +325,16 @@ async def refresh(cache_file: Path, character_table: Path) -> str:
                             )
                             response.raise_for_status()
                             apply_banners(found_pools, response.json())
-                    cached["wiki"] = {"fetched": now, "activities": found, "pools": found_pools}
+                        extra = [{"id": key, "banner_file": name, "image": ""} for key, name in hand.items()]
+                        if titles := banner_titles(extra):
+                            response = await wiki_client.get(
+                                WIKI_API,
+                                params={"action": "query", "format": "json", "formatversion": 2, "titles": "|".join(titles), "prop": "imageinfo", "iiprop": "url", "iiurlwidth": BANNER_WIDTH},
+                            )
+                            response.raise_for_status()
+                            apply_banners(extra, response.json())
+                    cached["wiki"] = {"fetched": now, "activities": found, "pools": found_pools, "hand_banners": hand,
+                                      "extra_images": {e["id"]: e["image"] for e in extra if e["image"]}}
                     done.append(f"wiki: {len(cached['wiki']['activities'])} activities")
                     break
                 except (httpx.HTTPError, ValueError) as e:
@@ -306,7 +343,7 @@ async def refresh(cache_file: Path, character_table: Path) -> str:
                 done.append(f"wiki unavailable ({failure})")
     if not done:
         return "unchanged"
-    cached["activities"] = merge(cached.get("game_activities") or [], (cached.get("wiki") or {}).get("activities") or [])
+    cached["activities"] = merge(cached.get("game_activities") or [], (cached.get("wiki") or {}).get("activities") or [], (cached.get("wiki") or {}).get("extra_images"))
     cached["pool_images"] = pool_images(cached.get("pools") or [], (cached.get("wiki") or {}).get("pools") or [])
     cache_file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     tmp = cache_file.with_suffix(".tmp")

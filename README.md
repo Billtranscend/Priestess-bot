@@ -365,6 +365,7 @@ plugins/
   skl_help/                    帮助图
   skland_ef_theme/             抽卡记录等页面的终末地风格模板，上游图片模板的小修正
   skland_compact_images/       上游插件渲染的图片统一转为 WebP，超长页面适当缩小；同时出图数有上限
+  render_image_cache/          渲染页面里的游戏图片（头像、图标、横幅）存到本地，下次直接读取，出图更快，图片不变
   skland_ark_assets/           上游明日方舟页面的外部图片改用本地缓存，缺的先补齐，避免外站慢时出图超时
   skland_auto_gacha/           终末地抽卡记录每日自动同步
   skland_ef_pools/             用 AKEData 数据生成终末地卡池表

@@ -84,6 +84,7 @@ ARKNIGHTS_REFRESH_MINUTES = 30
 LATE_LIMIT = timedelta(hours=24)  # an opening found later than this (downtime, late data) is not announced any more
 QUIET_HOURS = (0, 8)  # [from, to) Beijing hour: openings in this window are announced when it ends; None announces at once
 UPCOMING_DAYS = 14  # how far ahead the calendar looks
+LONG_WINDOW = timedelta(days=7)  # a year-long Arknights mode (集成战略, 生息演算, 卫戍协议·规程) is shown only this long before and after it opens (owner, 2026-11-07)
 SOON = timedelta(days=3)  # deadlines closer than this are highlighted
 WEEKDAYS = "一二三四五六日"
 REACTION_PROCESSING, REACTION_DONE, REACTION_FAIL = "66", "144", "10060"
@@ -165,6 +166,7 @@ def _arknights() -> dict:
         {
             "name": a["name"], "kind": a["kind"], "start": moment(a["start"]), "end": moment(a["end"]),
             "aliases": a.get("aliases") or [], "alt_starts": [moment(t) for t in a.get("alt_starts") or []], "art": a.get("image") or "",
+            "long": a["end"] - a["start"] > arknights.PERMANENT,
         }
         for a in index.get("activities") or []
     ]
@@ -191,13 +193,18 @@ ARKNIGHTS = Game("arknights", "明日方舟", "Arknights", "/mrfz活动", _arkni
 GAMES = (ENDFIELD, ARKNIGHTS)
 
 
+def _in_window(activity: dict, now: datetime) -> bool:
+    """Long modes only around their opening: a deadline a year away tells nobody anything."""
+    return not activity.get("long") or activity["start"] - LONG_WINDOW <= now < activity["start"] + LONG_WINDOW
+
+
 def open_now(items: list[dict], now: datetime) -> list[dict]:
     """Limited-time activities in progress, the one ending first on top. Permanent ones have no deadline to show."""
-    return sorted((a for a in items if a["start"] <= now and a["end"] and now < a["end"]), key=lambda a: a["end"])
+    return sorted((a for a in items if a["start"] <= now and a["end"] and now < a["end"] and _in_window(a, now)), key=lambda a: a["end"])
 
 
 def upcoming(items: list[dict], now: datetime, days: int = UPCOMING_DAYS) -> list[dict]:
-    return [a for a in items if now < a["start"] <= now + timedelta(days=days)]
+    return [a for a in items if now < a["start"] <= now + timedelta(days=days) and _in_window(a, now)]
 
 
 def current_pools(rows: list[dict], now: datetime) -> list[dict]:
@@ -209,7 +216,8 @@ def current_pools(rows: list[dict], now: datetime) -> list[dict]:
 
 
 def _moment(value: datetime) -> str:
-    return f"{value:%m/%d} 周{WEEKDAYS[value.weekday()]} {value:%H:%M}"
+    day = f"{value:%m/%d}" if value.year == datetime.now(CN).year else f"{value:%Y/%m/%d}"  # 卫戍协议·规程 ends a year later
+    return f"{day} 周{WEEKDAYS[value.weekday()]} {value:%H:%M}"
 
 
 def _span(delta: timedelta) -> str:
