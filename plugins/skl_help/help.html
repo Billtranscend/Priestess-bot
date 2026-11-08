@@ -129,7 +129,7 @@ td.note { color: var(--ef-sub); font-size: 18px; }
       <div><span class="time">00:20</span> 终末地自动签到</div>
       <div><span class="time">01:00</span> 终末地、明日方舟抽卡记录自动更新</div>
       <div class="dim">新绑定账号后也会自动拉取一次抽卡记录</div>
-      <div><span class="time">03:00</span> 群友配装数据更新</div>
+      <div><span class="time">03:00</span> 群友配装、干员持有数据更新</div>
       <div><span class="time">05:30</span><span class="time">17:30</span> 竞速榜、出场率、通关阵容数据更新</div>
       <div class="dim">约半小时内陆续更新完；新打出的记录要等下一次更新后才会上榜；每关只记森空岛的最佳（最快）记录</div>
       <div><span class="time">20:00</span> 各群推送本周任务（周日不推送）</div>
@@ -179,7 +179,7 @@ td.note { color: var(--ef-sub); font-size: 18px; }
       <tr><td class="cmd"><code>/zmd签到详情</code></td><td class="fn">查看自己的签到状态</td><td class="at"><span class="no">否</span></td><td class="note">只能查询自己</td></tr>
       <tr><td class="cmd"><code>/zmd抽卡记录</code></td><td class="fn">查看已保存的抽卡记录</td><td class="at"><span class="no">否</span></td><td class="note">每天 01:00 自动更新</td></tr>
       <tr><td class="cmd"><code>/zmd抽卡记录更新</code></td><td class="fn">立即拉取最新抽卡记录</td><td class="at"><span class="no">否</span></td><td class="note">想马上看到新记录时使用</td></tr>
-      <tr><td class="cmd"><code>/zmd导入小黑盒 小黑盒ID</code></td><td class="fn">从小黑盒补回更早的抽卡记录</td><td class="at"><span class="no">否</span></td><td class="note">只能导入与自己绑定 UID 相同的小黑盒账号；撤回发 <code>/zmd撤销小黑盒导入</code></td></tr>
+      <tr><td class="cmd"><code>/zmd导入小黑盒 小黑盒ID</code></td><td class="fn">从小黑盒补回更早的抽卡记录</td><td class="at"><span class="no">否</span></td><td class="note">只能导入与自己绑定 UID 相同的小黑盒账号</td></tr>
       <tr><td class="cmd"><code>/zmd欧非榜</code></td><td class="fn">本群欧非榜前 10 和后 10 名</td><td class="at"><span class="no">否</span></td><td class="note">仅群聊；发 <code>/zmd欧非榜 退出</code> 可不上榜</td></tr>
       <tr><td class="cmd"><code>/角色欧非榜</code></td><td class="fn">本群角色池完整欧非榜</td><td class="at"><span class="no">否</span></td><td class="note">仅群聊</td></tr>
       <tr><td class="cmd"><code>/武器欧非榜</code></td><td class="fn">本群武器池完整欧非榜</td><td class="at"><span class="no">否</span></td><td class="note">仅群聊</td></tr>
@@ -203,15 +203,13 @@ td.note { color: var(--ef-sub); font-size: 18px; }
       <tr><td class="cmd"><code>/战争回响</code></td><td class="fn">本期轮换的三个关卡和封面</td><td class="at"><span class="na">—</span></td><td class="note">顺序与游戏内一致，显示剩余时间</td></tr>
       <tr><td class="cmd"><code>/影拓丰碑</code></td><td class="fn">全部丰碑的封面和关卡序号</td><td class="at"><span class="na">—</span></td><td class="note">加丰碑名看该丰碑的关卡封面：<code>/影拓丰碑 幽影刻形</code></td></tr>
       <tr><td class="cmd"><code>/敌人 领袖敌人名</code></td><td class="fn">领袖敌人的特性和各级默认属性</td><td class="at"><span class="na">—</span></td><td class="note">例：<code>/敌人 祀</code>；<code>/敌人 领袖</code> 看目录</td></tr>
-      <tr><td class="cmd"><code>/敌人 关卡名 难度</code></td><td class="fn">只看关卡机制和敌人属性</td><td class="at"><span class="na">—</span></td><td class="note">也可写丰碑名；<code>/回响敌人</code> 本期轮换，<code>/丰碑敌人</code> 当前丰碑</td></tr>
-      <tr><td class="cmd"><code>/攻略 关卡名 难度</code></td><td class="fn">机制、敌人、本群通关阵容、推荐视频</td><td class="at"><span class="na">—</span></td><td class="note">例：<code>/攻略 重伤之围 残酷</code>、<code>/攻略 幽影刻形 2</code></td></tr>
+      <tr><td class="cmd"><code>/敌人 关卡名 难度</code></td><td class="fn">关卡机制和敌人属性</td><td class="at"><span class="na">—</span></td><td class="note">也可写丰碑名；<code>/回响敌人</code> 本期轮换，<code>/丰碑敌人</code> 当前丰碑</td></tr>
       <tr><td class="cmd"><code>/竞速榜</code></td><td class="fn">竞速榜目录，引导到回响 / 丰碑竞速</td><td class="at"><span class="na">—</span></td><td class="note">记不清关卡名就从这里进</td></tr>
       <tr><td class="cmd"><code>/竞速更新</code></td><td class="fn">立即拉取自己的战争回响 / 影拓丰碑记录，榜单马上更新</td><td class="at"><span class="na">—</span></td><td class="note">不用等每天两次的自动更新；每 5 分钟可更新一次</td></tr>
       <tr><td class="cmd"><code>/回响竞速 关卡名</code></td><td class="fn">战争回响本群最快通关排名</td><td class="at"><span class="na">—</span></td><td class="note">不带关卡名显示本周全部关卡</td></tr>
       <tr><td class="cmd"><code>/丰碑竞速 丰碑名</code></td><td class="fn">影拓丰碑本群最快通关排名</td><td class="at"><span class="na">—</span></td><td class="note">不带参数列出全部丰碑；也可写单关名</td></tr>
-      <tr><td class="cmd"><code>/榜单角色出场率</code></td><td class="fn">全部绑定玩家的高难干员出场率（不分群）</td><td class="at"><span class="na">—</span></td><td class="note">可加 关卡名 / 战争回响 / 影拓丰碑</td></tr>
-      <tr><td class="cmd"><code>/zmd持有率</code></td><td class="fn">全部绑定角色（权限 30 级起）的 6★ 干员持有率和平均潜能（不分群）</td><td class="at"><span class="na">—</span></td><td class="note">也可发 /持有率</td></tr>
-      <tr><td class="cmd"><code>/攻略统计 退出</code></td><td class="fn">不参与阵容、持有率统计和竞速榜</td><td class="at"><span class="na">—</span></td><td class="note">重新加入发 <code>/攻略统计 加入</code></td></tr>
+      <tr><td class="cmd"><code>/干员统计</code></td><td class="fn">全部绑定玩家的 6★ 干员持有率、平均潜能和高难出场率（不分群）</td><td class="at"><span class="na">—</span></td><td class="note">可加 关卡名 / 战争回响 / 影拓丰碑，只改出场率</td></tr>
+      <tr><td class="cmd"><code>/攻略统计 退出</code></td><td class="fn">不参与阵容、干员统计和竞速榜</td><td class="at"><span class="na">—</span></td><td class="note">重新加入发 <code>/攻略统计 加入</code></td></tr>
     </table>
   </div>
 

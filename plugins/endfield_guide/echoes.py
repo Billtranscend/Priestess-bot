@@ -416,20 +416,3 @@ def partners(data: dict, same: dict[str, str] | None = None, mates_top: int = 6,
         cid: {"n": n, "mates": mates[cid].most_common(mates_top), "teams": [[list(t), c] for t, c in lineups[cid].most_common(teams_top)]}
         for cid, n in users.items()
     }
-
-
-def team_stats(data: dict, group_members: set[str], stage_key: str, top: int = 3) -> dict:
-    """Most common teams among group members who cleared the stage."""
-    clears = [m["records"][stage_key] for qq, m in data.get("members", {}).items() if qq in group_members and stage_key in m.get("records", {})]
-    teams: dict[tuple, list] = {}
-    for clear in clears:
-        teams.setdefault(tuple(sorted(c["id"] for c in clear["team"])), []).append(clear)
-    ranked = sorted(teams.items(), key=lambda kv: len(kv[1]), reverse=True)[:top]
-    result = []
-    for ids, members in ranked:
-        chars = []
-        for cid in ids:
-            rows = [c for m in members for c in m["team"] if c["id"] == cid]
-            chars.append({"id": cid, "lv": round(sum(r["lv"] for r in rows) / len(rows)), "pot": round(sum(r["pot"] for r in rows) / len(rows), 1)})
-        result.append({"count": len(members), "plus": sum(1 for m in members if m["plus"]), "chars": chars})
-    return {"clears": len(clears), "plus": sum(1 for c in clears if c["plus"]), "teams": result}

@@ -252,7 +252,7 @@ def _rotation_section(index: dict, now: datetime) -> str:
         )
     else:
         rows.append('<div class="rot"><div class="rl next">下期</div><div><b>待公布</b><div class="sub">游戏数据更新后自动显示</div></div></div>')
-    return _card("战争回响轮换", "".join(rows), "关卡攻略发 /攻略 关卡名")
+    return _card("战争回响轮换", "".join(rows), "机制和敌人属性发 /回响敌人")
 
 
 def _shrink(content: bytes) -> tuple[str, float] | None:

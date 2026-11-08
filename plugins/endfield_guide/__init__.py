@@ -1,18 +1,20 @@
 """Endfield endgame stage guides: 战争回响 and 影拓丰碑.
 
-/攻略 <关卡名> [难度]     stage card: mechanics, enemies, 增辉 condition, group clear teams, Bilibili videos
 /战争回响                 this week's rotation: stages in game order with their covers
 /影拓丰碑 [丰碑名]         every series with its cover; one series: its stages in game order with covers
-/敌人 <关卡|丰碑> [难度]   mechanics and enemy attributes, no teams or videos (/回响敌人: this week's rotation, /丰碑敌人: the current series)
+/敌人 <关卡|丰碑> [难度]   mechanics and enemy attributes (/回响敌人: this week's rotation, /丰碑敌人: the current series)
 /攻略统计 退出|加入        opt out of / back into the group clear-team statistics
 /竞速榜                   menu → /回响竞速 [关卡]  /丰碑竞速 [丰碑|关卡]
 /竞速更新                 fetch the sender's own 战争回响 / 影拓丰碑 clears now, so the boards show them at once
                           (owner 2026-11-06: members refresh themselves instead of waiting for the collection);
                           once per REFRESH_COOLDOWN per member, not while the collection runs
-/zmd持有率                share of bound roles (every account, 权限等级 30+) owning each 6-star operator, with the owners' average potential
+/干员统计 [关卡|战争回响|影拓丰碑]  one table of the 6-star operators: share of bound roles (every account, 权限等级 30+)
+                          owning each, the owners' average potential, and the share of recorded hard clears using it
+                          (owner 2026-11-08: the former /zmd持有率 and /榜单角色出场率 merged, their names kept as aliases)
 
-Stage data comes from the endfield_wiki AKEData index; clear teams from members'
-Skland War Echoes records (collected twice a day); videos from Bilibili search.
+Stage data comes from the endfield_wiki AKEData index; clears and teams from members'
+Skland War Echoes records (collected twice a day). /攻略 (stage card with group teams and
+Bilibili videos) was removed 2026-11-08: members read /敌人 instead.
 The game's stage order and the series covers also come from Skland (see stages.py).
 """
 
@@ -53,20 +55,18 @@ from plugins.endfield_wiki import data as wiki_data
 from plugins.endfield_wiki.lookup import normalize, to_pinyin
 
 from . import stages
-from .bili import BiliSearch
 from .builds import HOLDING_MIN_LEVEL, BuildStore
-from .echoes import ECHO_SCHEMA, EchoStore, partners, speed_ranking, team_stats, usage_rates
+from .echoes import ECHO_SCHEMA, EchoStore, partners, speed_ranking, usage_rates
 
 __plugin_meta__ = PluginMetadata(
     name="Endfield stage guide",
-    description="战争回响 / 影拓丰碑 stage guides with group clear teams and Bilibili videos.",
-    usage="/攻略 重伤之围 残酷  /战争回响  /影拓丰碑",
+    description="战争回响 / 影拓丰碑 stage pages, enemies, speed boards and operator stats.",
+    usage="/战争回响  /影拓丰碑  /敌人 重伤之围 残酷",
     type="application",
 )
 
 DATA_DIR = store.get_plugin_data_dir()
 DATA_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
-bili = BiliSearch(DATA_DIR / "videos.json")
 echo_store = EchoStore(DATA_DIR / "echoes.json", DATA_DIR / "optout.json")
 build_store = BuildStore(DATA_DIR / "builds.json")  # read by endfield_wiki for the build statistics on its cards
 covers = stages.Covers(wiki.IMAGE_DIR)
@@ -77,14 +77,13 @@ DIFFICULTY_WORDS = {
     "普通": "普通", "简单": "普通", "困难": "困难", "残酷": "残酷", "增辉": "残酷",
     "苦难": "苦难", "镀层": "苦难", "高难": "苦难",
 }
-BOOST = {"残酷": ("残酷", "增辉"), "苦难": ("苦难", "镀层"), "困难": ("困难",), "普通": ()}
 STAGE_NUMBER = re.compile(r"^第?(\d{1,2})关?$")  # "2" / "第2关": a stage of a 影拓丰碑 series by its number
 ROTATION_WORDS = ("战争回响", "回响", "本周", "本期")
 MONUMENT_WORDS = ("影拓丰碑", "丰碑")
 ENEMY_USAGE = (
     "/敌人 领袖敌人名　该敌人的特性和各级默认属性，例：/敌人 祀、/敌人 罗丹\n"
     "/敌人 领袖　领袖敌人目录\n\n"
-    "只看关卡机制和敌人属性（不含通关阵容和视频）\n"
+    "关卡机制和敌人属性\n"
     "/敌人 关卡名 [难度]　例：/敌人 暗曜白霆、/敌人 重伤之围 残酷\n"
     "/敌人 丰碑名　整个丰碑的全部关卡，例：/敌人 幽影刻形\n"
     "/敌人 丰碑名 序号　例：/敌人 幽影刻形 2\n"
@@ -92,7 +91,6 @@ ENEMY_USAGE = (
     "/丰碑敌人　当前活动中的丰碑"
 )
 
-guide = on_command("攻略", rule=strict, priority=5, block=True)
 rotation = on_command("战争回响", rule=strict, priority=5, block=True)
 monument_list = on_command("影拓丰碑", rule=strict, priority=5, block=True)
 enemy = on_command("敌人", aliases={"敌人属性", "敌人数值", "回响敌人", "丰碑敌人"}, rule=strict, priority=5, block=True)
@@ -100,8 +98,13 @@ stats_opt = on_command("攻略统计", aliases={"战绩统计"}, rule=strict, pr
 speed_board = on_command("竞速榜", rule=strict, priority=5, block=True)
 echo_speed = on_command("回响竞速", aliases={"战争回响竞速"}, rule=strict, priority=5, block=True)
 monument_speed = on_command("丰碑竞速", aliases={"影拓丰碑竞速"}, rule=strict, priority=5, block=True)
-usage_board = on_command("榜单角色出场率", aliases={"角色出场率"}, rule=strict, priority=5, block=True)
-holding_board = on_command("zmd持有率", aliases={"终末地持有率", "干员持有率", "持有率"}, rule=strict, priority=5, block=True)
+operator_stats = on_command(
+    "干员统计",
+    aliases={"zmd干员统计", "榜单角色出场率", "角色出场率", "zmd持有率", "终末地持有率", "干员持有率", "持有率"},
+    rule=strict,
+    priority=5,
+    block=True,
+)
 collect_now = on_command("攻略数据更新", rule=strict, permission=SUPERUSER, priority=5, block=True)
 speed_refresh = on_command("竞速更新", aliases={"更新竞速"}, rule=strict, priority=5, block=True)
 REFRESH_COOLDOWN = 300  # seconds between one member's /竞速更新
@@ -175,16 +178,6 @@ def _current_week(endgame: dict) -> tuple[dict, dict] | None:
             if start and end and start <= now < end:
                 return season, week
     return None
-
-
-def _last_seen(endgame: dict, group_id: str) -> str:
-    seen = ""
-    for season in endgame.get("tower_seasons", []):
-        for week in season["weeks"]:
-            start = _parse_time(week["open"])
-            if group_id in week["groups"] and start and start <= datetime.now(CN):
-                seen = f"{season['name']}·{week['name'] or '轮换' + str(week['week'])}"
-    return seen
 
 
 def _stage_groups(endgame: dict) -> list[dict]:
@@ -266,9 +259,6 @@ async def _send_page(matcher, build, fallback: str) -> None:
     await _react(REACTION_DONE)
 
 
-def _video_text(videos) -> str:
-    return "\n".join(f"{i}. {v.title[:40]}\nhttps://www.bilibili.com/video/{v.bvid}" for i, v in enumerate(videos, 1))
-
 
 _partners_cache: dict = {"key": None, "value": {}}
 
@@ -333,7 +323,7 @@ async def _() -> None:
     lines = [f"战争回响 · {season['name']} · {week['name'] or '轮换' + str(week['week'])}",
              f"剩余 {left.days} 天 {left.seconds // 3600} 小时（{end:%m/%d %H:%M} 轮换）", ""]
     lines += [f"{i}. {n}" for i, n in enumerate(names, 1)]
-    lines += ["", "发送 /攻略 关卡名 查看攻略，例如 /攻略 " + (names[0] if names else "重伤之围") + " 残酷", "只看机制和敌人属性发 /回响敌人"]
+    lines += ["", "机制和敌人属性发 /回响敌人，单关发 /敌人 关卡名，例如 /敌人 " + (names[0] if names else "重伤之围") + " 残酷"]
 
     async def build() -> str:
         art, icons = await asyncio.gather(covers.get(_cover_jobs([], groups)), _foe_icons(groups))
@@ -347,7 +337,7 @@ def _monument_text(endgame: dict) -> str:
     lines += [f"【{series['name']}】{_numbered(series)}" for series in endgame.get("monument", [])]
     if endgame.get("monument"):
         first = endgame["monument"][0]
-        lines.append(f"\n发送 /攻略 关卡名 苦难 查看攻略，例如 /攻略 {first['groups'][0]['name']} 苦难\n只看机制和敌人属性发 /敌人 {first['name']}")
+        lines.append(f"\n机制和敌人属性发 /敌人 关卡名，例如 /敌人 {first['groups'][0]['name']} 苦难\n整个丰碑发 /敌人 {first['name']}")
     return "\n".join(lines)
 
 
@@ -447,7 +437,7 @@ async def _(arg: Message = CommandArg(), command: tuple[str, ...] = Command()) -
 async def _(event: MessageEvent, arg: Message = CommandArg()) -> None:
     action = arg.extract_plain_text().strip()
     if action not in ("退出", "加入"):
-        await stats_opt.finish("用法：/攻略统计 退出  或  /攻略统计 加入\n（攻略图的通关阵容、竞速榜和角色出场率会使用已绑定群友的战争回响 / 影拓丰碑最佳记录）")
+        await stats_opt.finish("用法：/攻略统计 退出  或  /攻略统计 加入\n（竞速榜、/干员统计 和资料卡上的常用队友会使用已绑定群友的战争回响 / 影拓丰碑最佳记录和干员持有情况）")
     echo_store.set_optout(str(event.user_id), action == "退出")
     await _react(REACTION_DONE)
     await stats_opt.finish("已退出统计，你的记录不会再被收集，也不会出现在竞速榜上" if action == "退出" else "已重新加入通关阵容统计，下次更新后生效", at_sender=True)
@@ -504,227 +494,6 @@ async def _() -> None:
     await collect_now.send("开始收集战争回响通关记录和干员配装，约需半小时（期间榜单会陆续更新）…")
     stats = await echo_store.collect(build_store)
     await collect_now.finish(f"收集完成：{stats}")
-
-
-@guide.handle()
-async def _(bot: Bot, event: MessageEvent, arg: Message = CommandArg()) -> None:
-    query, difficulty, number = _words(arg)
-    endgame = _endgame()
-    if not query:
-        await guide.finish("用法：/攻略 关卡名 [难度]\n例如 /攻略 重伤之围 残酷、/攻略 暗曜白霆 苦难、/攻略 幽影刻形 2\n本周关卡发 /战争回响，影拓丰碑关卡发 /影拓丰碑")
-    found = _resolve(endgame, query)
-    if not found:
-        await guide.finish(f"没有找到「{query}」，发 /战争回响 或 /影拓丰碑 查看全部关卡名")
-    kind, target = found
-    if kind == "candidates":
-        await guide.finish(f"找到多个关卡：{'、'.join(target)}\n请输入更完整的名字")
-    if kind == "series" and number and 1 <= number <= len(target["groups"]):
-        kind, target = "group", target["groups"][number - 1]
-    if kind == "series":
-        await guide.finish(f"影拓丰碑【{target['name']}】包含：{_numbered(target)}\n请发 /攻略 关卡名 苦难 或 /攻略 {target['name']} 序号 查看单关攻略")
-
-    group = target
-    is_tower = group["mode"] == "战争回响"
-    difficulty = difficulty if difficulty and any(s["difficulty"] == difficulty for s in group["stages"]) else ("残酷" if is_tower else "苦难")
-    stage = next(s for s in group["stages"] if s["difficulty"] == difficulty)
-
-    await _react(REACTION_PROCESSING)
-    try:
-        await _rich_css()
-        videos, stale = await bili.videos(group["name"], BOOST.get(difficulty, ()))
-        pool, _ = await _member_pool(bot, event)
-        data = _load_echoes()
-        clears = team_stats(data, pool, f"{group['name']}|{difficulty}")
-        target_text = data.get("targets", {}).get(f"{group['name']}|{difficulty}", "") or stage.get("extra_goal", "")
-        html = await _render(endgame, group, stage, difficulty, clears, target_text, videos, stale, isinstance(event, GroupMessageEvent))
-        image = await ef_theme.render_page(html, WIDTH, template_path=wiki.DATA_DIR.as_uri())
-        await UniMessage.image(raw=image).send()
-        if videos:
-            await guide.send("推荐视频（点击链接观看）\n" + _video_text(videos))
-    except MatcherException:
-        raise
-    except Exception as e:
-        logger.warning(f"Stage guide failed: {type(e).__name__}: {e}")
-        await _react(REACTION_FAIL)
-        await guide.finish("攻略生成失败，请稍后再试")
-    await _react(REACTION_DONE)
-
-
-# ── rendering ──────────────────────────────────────────────────────────
-
-
-async def _enemy_table(enemies: list[dict]) -> str:
-    if not enemies or "hp" not in enemies[0]:  # index built before enemy stats were added
-        items = "".join(f'<li>{escape(e["name"])}<small>Lv{e["level"]}</small></li>' for e in enemies)
-        return _box("敌人", f"<ul>{items}</ul>")
-    same_def = len({e.get("def") for e in enemies}) == 1
-    poise = all("poise" in e for e in enemies)  # index built before the bonus lines were added
-    icons = await asyncio.gather(
-        *(wiki._cached_image(wiki_data.enemy_icon_url(e["icon"]), f"{e['icon']}.png") if e.get("icon") else asyncio.sleep(0, "") for e in enemies)
-    )
-    rows = []
-    for e, icon in zip(enemies, icons):
-        thumb = f'<img src="{escape(icon)}">' if icon else '<i class="ph"></i>'
-        notes = stages.notes_html(e)
-        rows.append(
-            f'<tr><td class="ei"{" rowspan=2" if notes else ""}>{thumb}</td><td class="fe">{escape(e["name"])}{" *" if e.get("plain") else ""}</td>'
-            f'<td class="lv">Lv{e["level"]}</td><td class="num">{e.get("hp", 0):,}</td>'
-            f'<td class="num">{e.get("atk", 0):,}</td>' + ("" if same_def else f'<td class="num">{e.get("def", 0):,}</td>')
-            + (f'<td class="num">{e["poise"]:,}</td>' if poise else "")
-            + f'<td class="rs">{stages.res_html(e)}</td></tr>'
-            + (f'<tr class="bn"><td colspan="{(4 if same_def else 5) + poise + 1}">{notes}</td></tr>' if notes else "")
-        )
-    head = (
-        "<th></th><th>敌人</th><th>等级</th><th class=\"num\">生命值</th><th class=\"num\">攻击力</th>"
-        + ("" if same_def else "<th class=\"num\">防御力</th>")
-        + ("<th class=\"num\">失衡值上限</th>" if poise else "")
-        + "<th>抗性</th>"
-    )
-    note = f"防御力均为 {enemies[0].get('def', 0)}；" if same_def else ""
-    plain = "；带 * 的敌人不在关卡的固定刷怪配置中（多为战斗中召唤），按其自身属性显示" if any(e.get("plain") for e in enemies) else ""
-    return _box(
-        "敌人数值",
-        f'<table class="foe"><tr>{head}</tr>{"".join(rows)}</table>'
-        f'<div class="note">{note}数值为敌人在本关卡内的最终属性，已包含每行下方列出的出生加成（该敌人自带）和关卡加成，未计入上方的特殊增益；抗性越高，受到该类伤害越少{plain}</div>',
-        f"{len(enemies)} 种",
-    )
-
-
-GUIDE_CSS = """
-body { width: %dpx; padding: 24px; }
-.ef-head h1 { font-size: 46px; }
-.ef-head p { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; color: #b9b9b2; }
-.ef-head p span { font-size: 15px; padding: 3px 12px; border: 1px solid #55554f; color: #b9b9b2; }
-.ef-head p span i { font-style: normal; font-family: var(--ef-num); font-weight: 600; font-size: 17px; letter-spacing: .3px; }
-.ef-head p span.on { background: var(--ef-yellow); border-color: var(--ef-yellow); color: var(--ef-ink); font-weight: 700; }
-.ef-head p span.live { border-color: var(--ef-yellow); color: var(--ef-yellow); }
-.ef-head p span.past { border: 0; padding-left: 4px; color: #8d8d86; }
-.bd { padding: 12px 16px 14px; }
-.desc { font-size: 16px; line-height: 1.8; }
-.dim { color: var(--ef-faint); }
-.up { font-family: var(--ef-num); font-weight: 700; font-size: 16px; padding: 0 3px; margin: 0 1px; background: var(--ef-yellow); color: var(--ef-ink); }
-.down { font-weight: 700; color: var(--ef-red); }
-.key { font-weight: 700; color: var(--ef-ink); box-shadow: inset 0 -.45em 0 var(--ef-yellow); }
-.term { font-weight: 700; color: var(--ef-ink); border-bottom: 1px dashed var(--ef-ink); }
-.info { color: var(--ef-sub); }
-ul { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; }
-li { background: #fff; border: 1px solid var(--ef-line); padding: 4px 10px; font-size: 15px; }
-li small { color: var(--ef-sub); margin-left: 6px; font-family: var(--ef-num); font-size: 15px; }
-.note { font-size: 13px; color: var(--ef-sub); margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--ef-line-2); }
-table { width: 100%%; border-collapse: collapse; font-size: 15px; }
-th { text-align: left; padding: 4px 8px 6px; font-size: 13px; font-weight: 400; color: var(--ef-sub); border-bottom: 1px solid var(--ef-ink); white-space: nowrap; }
-td { text-align: left; padding: 7px 8px; border-top: 1px solid var(--ef-line-2); white-space: nowrap; vertical-align: middle; }
-tr:nth-child(2) td { border-top: 0; }
-th.n, td.n, th.num, td.num { text-align: right; }
-td.n, td.num, td.lv { font-family: var(--ef-num); font-weight: 600; font-size: 18px; letter-spacing: .3px; }
-table.foe { font-size: 16px; } table.foe td.fe { font-weight: 700; }
-table.foe td.ei { width: 66px; padding: 5px 8px 5px 0; }
-table.foe td.ei img, table.foe td.ei .ph { display: block; width: 54px; height: 54px; object-fit: contain; background: var(--ef-panel-2); border: 1px solid var(--ef-line); }
-table.foe td.rs { white-space: normal; color: var(--ef-sub); font-size: 14px; }
-table.foe td.rs b { font-family: var(--ef-num); font-weight: 700; font-size: 17px; color: var(--ef-ink); }
-table.vid td.vt { white-space: normal; width: 60%%; line-height: 1.5; } table.vid td.au { color: var(--ef-sub); }
-.team { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-top: 1px solid var(--ef-line-2); }
-.team:first-child { border-top: 0; padding-top: 4px; }
-.tn { width: 190px; flex: none; font-weight: 900; font-size: 18px; }
-.tn i { font-style: normal; display: inline-block; min-width: 26px; height: 26px; line-height: 26px; text-align: center; margin-left: 4px;
-  font-family: var(--ef-num); font-weight: 700; font-size: 18px; background: var(--ef-ink); color: #f4f4f0; }
-.team.t1 .tn i { background: var(--ef-yellow); color: var(--ef-ink); box-shadow: 0 0 0 1px var(--ef-ink); }
-.team.t2 .tn i { background: var(--ef-silver); color: var(--ef-ink); box-shadow: 0 0 0 1px var(--ef-ink); }
-.team.t3 .tn i { background: var(--ef-copper); color: #fff; box-shadow: 0 0 0 1px var(--ef-ink); }
-.tn small { display: block; margin-top: 6px; font-size: 13px; color: var(--ef-sub); font-weight: 400; line-height: 1.5; }
-.ops { display: flex; gap: 12px; }
-.op { width: 120px; text-align: center; }
-.op img, .op .ph { width: 74px; height: 74px; object-fit: contain; background: var(--ef-panel-2); border: 1px solid var(--ef-line); border-bottom: 3px solid var(--ef-ink); margin: 0 auto; display: block; }
-.op b { display: block; font-size: 15px; margin-top: 5px; }
-.op small { font-family: var(--ef-num); font-weight: 500; font-size: 14px; color: var(--ef-sub); }
-"""
-
-
-def _box(title: str, body: str, small: str = "") -> str:
-    """One light section panel (ef_theme .ef-sec) with padded content."""
-    note = f'<small class="cjk">{small}</small>' if small else ""
-    return f'<div class="ef-sec"><h3>{title}{note}</h3><div class="bd">{body}</div></div>'
-
-
-async def _render(endgame, group, stage, difficulty, clears, target_text, videos, stale, in_group) -> str:
-    index = wiki._resolver()[0]
-    operators = index["operators"]
-    is_tower = group["mode"] == "战争回响"
-    tabs = "".join(f'<span class="{"on" if s["difficulty"] == difficulty else ""}">{s["difficulty"]} · <i>Lv{s["recommend_lv"]}</i></span>' for s in group["stages"])
-
-    status = ""
-    if is_tower:
-        current = _current_week(endgame)
-        if current and group["id"] in current[1]["groups"]:
-            end = _parse_time(current[1]["close"])
-            status = f'<span class="live">本周开放中 · <i>{end:%m/%d %H:%M}</i> 轮换</span>'
-        elif seen := _last_seen(endgame, group["id"]):
-            status = f'<span class="past">上次出现：{escape(seen)}</span>'
-    else:
-        number = f" · 第{group['no']}关" if group.get("no") else ""
-        status = f'<span class="past">系列：{escape(group["series"])}{number}</span>'
-
-    enemy_block = await _enemy_table(stage["enemies"])
-    extra = ""
-    if stage["special_buff"]:
-        extra += _box("特殊增益", f'<div class="desc">{stage["special_buff"]}</div>')
-    if target_text:
-        extra += _box("增辉条件", f'<div class="desc">{escape(target_text)}</div>')
-    elif is_tower and difficulty == "残酷":
-        extra += _box("增辉条件", '<div class="desc dim">通关残酷难度并完成该关卡的附加挑战目标，可使该关卡评级获得增辉。</div>')
-    if not is_tower and difficulty == "苦难":
-        extra += _box("镀层", '<div class="desc dim">通关该系列苦难模式的全部关卡后，即可为该系列蚀刻章镀层</div>')
-
-    team_block = _box("本群通关阵容", '<div class="desc dim">暂无群友的通关记录（绑定森空岛后，数据每天 05:30、17:30 起陆续更新）</div>')
-    if clears and clears["teams"]:
-        rows = []
-        for i, team in enumerate(clears["teams"], 1):
-            cells = []
-            for c in team["chars"]:
-                op = operators.get(c["id"], {})
-                icon = await wiki._cached_image(wiki_data.char_icon_url(c["id"]), f"chr_{c['id']}.png") if op else ""
-                img = f'<img src="{escape(icon)}">' if icon else '<div class="ph"></div>'
-                cells.append(f'<div class="op">{img}<b>{escape(op.get("name", c["id"]))}</b><small>Lv{c["lv"]} · 潜能{c["pot"]:g}</small></div>')
-            plus = f" · 其中 {team['plus']} 人增辉" if difficulty == "残酷" else ""
-            rows.append(f'<div class="team t{i}"><div class="tn">阵容 <i>{i}</i><small>{team["count"]} 人使用{plus}</small></div><div class="ops">{"".join(cells)}</div></div>')
-        scope = "本群" if in_group else "你"
-        team_block = _box(
-            f"{scope}通关阵容",
-            f'{"".join(rows)}<div class="note">等级 / 潜能为使用该阵容群友的平均值；数据每天 05:30、17:30 起陆续更新，不含武器与装备</div>',
-            f'{clears["clears"]} 人通关{difficulty}' + (f'，{clears["plus"]} 人增辉' if difficulty == "残酷" else ""),
-        )
-
-    if videos:
-        video_rows = "".join(
-            f'<tr><td class="vt">{escape(v.title)}</td><td class="au">{escape(v.author)}</td><td class="n">{v.play:,}</td><td class="n">{escape(v.duration)}</td>'
-            f'<td class="n">{datetime.fromtimestamp(v.pubdate, CN):%m/%d}</td></tr>'
-            for v in videos
-        )
-        stale_note = "（B站暂时无法访问，显示的是上次结果）" if stale else ""
-        video_block = _box(
-            "推荐视频",
-            f'<table class="vid"><tr><th>标题</th><th>UP主</th><th class="n">播放</th><th class="n">时长</th><th class="n">发布</th></tr>{video_rows}</table>',
-            f"按热度与发布时间排序{stale_note}，链接见下一条消息",
-        )
-    else:
-        video_block = _box("推荐视频", '<div class="desc dim">暂时没有找到标题含该关卡名的视频</div>')
-
-    mechanics = _box(
-        "关卡机制",
-        '<div class="desc">' + (stage["feature"] or '<span class="dim">无特殊机制说明</span>') + "</div>",
-        f'{escape(difficulty)} · 推荐等级 {stage["recommend_lv"]}',
-    )
-    return (
-        f'<!doctype html><html><head><meta charset="utf-8"><style>{ef_theme.css()}{GUIDE_CSS % WIDTH}{stages.NOTES_CSS}{stages.RICH_CSS}</style></head><body class="ef">'
-        + ef_theme.head(f'Arknights: Endfield · {escape(group["mode"])}', escape(group["name"]), f"{tabs}{status}")
-        + f"{mechanics}{enemy_block}{extra}{team_block}{video_block}"
-        + ef_theme.foot(
-            f'关卡数据 AKEData · 阵容 森空岛战绩 · 视频 哔哩哔哩<br>数据版本 <span class="ef-num">{escape(index.get("version", ""))}</span>',
-            notes=stages.ENEMY_NOTES,
-            title="数值怎么读",
-        )
-        + "</body></html>"
-    )
 
 
 # ── speed leaderboard and operator usage ──────────────────────────────
@@ -784,6 +553,16 @@ td.ct { width: 84px; text-align: right; color: var(--ef-sub); font-size: 15px; w
 td.pt { width: 92px; text-align: right; font-family: var(--ef-num); font-weight: 700; font-size: 22px; white-space: nowrap; }
 tr.hd td { padding: 6px 10px; font-size: 13px; color: var(--ef-sub); border-top: 0; text-align: right; font-family: inherit; }
 tr.hd + tr td { border-top: 1px solid var(--ef-line-2); }
+table.stats { table-layout: fixed; }
+table.stats td.rk, table.stats td.ic, table.stats td.nm, table.stats td.pc, table.stats td.pt { width: auto; }
+table.stats td.nm { max-width: none; }
+table.stats td.g { border-left: 1px solid var(--ef-line); }
+table.stats td.bw { padding-right: 4px; }
+table.stats .bar.own { background: var(--ef-sub); box-shadow: none; }
+table.stats td.pt { text-align: center; }
+table.stats td.pc small { display: block; font-size: 13px; color: var(--ef-sub); font-weight: 500; font-family: inherit; }
+table.stats tr.hd td { text-align: center; font-size: 14px; font-weight: 700; color: var(--ef-ink); padding: 8px 10px; border-bottom: 2px solid var(--ef-ink); }
+table.stats tr.hd td.g { border-left: 1px solid var(--ef-line); }
 """
 
 BOARD_WIDTH = 1000
@@ -953,109 +732,93 @@ async def _(bot: Bot, event: MessageEvent, arg: Message = CommandArg()) -> None:
         await monument_speed.finish(hint + "\n\n" + _monument_menu(endgame))
 
 
-@usage_board.handle()
-async def _(bot: Bot, event: MessageEvent, arg: Message = CommandArg()) -> None:
-    query = arg.extract_plain_text().strip()
-    endgame = _endgame()
-    tops = {f"{g['name']}|{_top_difficulty(g)}" for g in _stage_groups(endgame)}
-    if not query:
-        keys, scope = tops, "全部关卡（战争回响残酷、影拓丰碑苦难）"
-    elif query in ("战争回响", "本周"):
-        current = _current_week(endgame)
-        keys = {f"{endgame['tower'][g]['name']}|残酷" for g in current[1]["groups"]} if current else set()
-        scope = "本周战争回响（残酷）"
-    elif query == "影拓丰碑":
-        keys = {f"{g['name']}|苦难" for s in endgame.get("monument", []) for g in s["groups"]}
-        scope = "影拓丰碑（苦难）"
-    else:
-        found = _resolve(endgame, query)
-        if not found or found[0] != "group":
-            await usage_board.finish(f"没有找到「{query}」\n用法：/榜单角色出场率 [关卡名 | 战争回响 | 影拓丰碑]")
-        g = found[1]
-        keys, scope = {f"{g['name']}|{_top_difficulty(g)}"}, f"{g['name']}（{_top_difficulty(g)}）"
-
-    await _react(REACTION_PROCESSING)
-    try:
-        data = _load_echoes()
-        pool = set(data.get("members", {})) - echo_store.optout()  # every bound player, not just this group
-        total, raw_counts = usage_rates(data, pool, keys)
-        players = {qq for qq, m in data.get("members", {}).items() if any(keys is None or k in keys for k in m.get("records", {}))}
-        counts = Counter()
-        for cid, n in raw_counts.items():  # male/female Endministrator share one entry
-            counts[ENDMIN_IDS.get(cid, cid)] += n
-        operators = wiki._resolver()[0]["operators"]
-        if not total:
-            body = '<div class="ef-sec"><h3>出场率</h3><div class="ef-empty">还没有相关的通关记录</div></div>'
-        else:
-            top = counts.most_common(40)
-            peak = top[0][1]
-            rows = []
-            for i, (cid, n) in enumerate(top, 1):
-                src = await _icon(cid) if cid in operators else ""
-                rows.append(
-                    f'<tr><td class="rk">{_rank(i)}</td><td class="ic">{f"<img src={chr(34)}{escape(src)}{chr(34)}>" if src else ""}</td>'
-                    f'<td class="nm">{escape(operators.get(cid, {}).get("name", cid))}</td>'
-                    f'<td><div class="bar" style="width:{max(2, n / peak * 100):.0f}%"></div></td>'
-                    f'<td class="pc">{n / total * 100:.1f}%</td><td class="ct">{n} 次</td></tr>'
-                )
-            body = f'<div class="ef-sec"><h3>{escape(scope)}<small class="cjk">{len(pool & players)} 位玩家 · 共 {total} 条通关记录</small></h3><table>{"".join(rows)}</table></div>'
-        foot = "出场率 = 带该干员的通关记录数 ÷ 通关记录总数（每条记录为一位玩家在一关的最快编队）<br>数据每天 05:30、17:30 起陆续更新；不想参与统计可发 /攻略统计 退出"
-        image = await _board_page("终末地 · <em>榜单角色出场率</em>", "全部绑定玩家（不分群）高难关卡最快编队中各干员的使用比例", body, foot, "Endfield · Usage Rate")
-        await UniMessage.image(raw=image).send()
-    except MatcherException:
-        raise
-    except Exception as e:
-        logger.warning(f"Usage board failed: {type(e).__name__}: {e}")
-        await _react(REACTION_FAIL)
-        await usage_board.finish("出场率生成失败，请稍后再试")
-    await _react(REACTION_DONE)
-
-
-HOLDING_RARITY = 6  # the owner's choice: lower rarities say little
-HOLDING_LEFT_OUT = {"管理员"}  # everyone starts with the Endministrator: it says nothing about pulls
-HOLDING_FOOT = (
-    "持有率 = 持有该干员的角色数 ÷ 已统计角色数；平均潜能只算持有者，范围 0–5；管理员开局赠送，不计入<br>"
-    f"绑定的所有森空岛账号和角色都计入，一人多号算多个，权限等级 {HOLDING_MIN_LEVEL} 级起；只代表绑定了机器人的玩家；数据每天 03:00 更新；不想参与可发送 /攻略统计 退出"
+STATS_RARITY = 6  # the owner's choice: lower rarities say little
+STATS_LEFT_OUT = {"管理员"}  # everyone starts with the Endministrator: it says nothing about pulls
+STATS_USAGE = "用法：/干员统计 [关卡名 | 战争回响 | 影拓丰碑]"
+STATS_FOOT = (
+    f"持有率 = 持有该干员的角色数 ÷ 已统计角色数；绑定的所有森空岛账号和角色都计入，一人多号算多个，权限等级 {HOLDING_MIN_LEVEL} 级起；平均潜能只算持有者，范围 0–5<br>"
+    "出场率 = 带该干员的通关记录数 ÷ 通关记录总数，每条记录为一位玩家在一关的最快编队；可加 关卡名 / 战争回响 / 影拓丰碑 只看这部分关卡<br>"
+    "只代表绑定了机器人的玩家；持有率每天 03:00 更新，出场率每天 05:30、17:30 起陆续更新；不想参与可发送 /攻略统计 退出"
 )
 
 
-async def _holding_body(total: int, held: dict[str, tuple[int, float]]) -> str:
-    """Most owned first. An operator nobody owns is left out: it may not be released yet."""
-    by_name: dict[str, tuple[str, dict]] = {}
+def _usage_scope(endgame: dict, query: str) -> tuple[set[str], str] | None:
+    """(stage keys, label) for the clears the usage column counts; None when the query names nothing."""
+    if not query:
+        return {f"{g['name']}|{_top_difficulty(g)}" for g in _stage_groups(endgame)}, "全部关卡（战争回响残酷、影拓丰碑苦难）"
+    if query in ("战争回响", "本周"):
+        current = _current_week(endgame)
+        return ({f"{endgame['tower'][g]['name']}|残酷" for g in current[1]["groups"]} if current else set()), "本周战争回响（残酷）"
+    if query == "影拓丰碑":
+        return {f"{g['name']}|苦难" for s in endgame.get("monument", []) for g in s["groups"]}, "影拓丰碑（苦难）"
+    found = _resolve(endgame, query)
+    if not found or found[0] != "group":
+        return None
+    g = found[1]
+    return {f"{g['name']}|{_top_difficulty(g)}"}, f"{g['name']}（{_top_difficulty(g)}）"
+
+
+async def _stats_body(roles: int, held: dict[str, tuple[int, float]], clears: int, used: Counter, scope: str, players: int) -> str:
+    """6-star operators, most used first, then most owned. One nobody owns or uses is left out: it may not be released yet."""
+    by_name: dict[str, str] = {}
     for char_id, operator in sorted(wiki._resolver()[0]["operators"].items()):
-        by_name.setdefault(operator["name"], (char_id, operator))  # the three Endministrator ids share one entry
-    rows = sorted(
-        ((name, *held[name], by_name[name][0]) for name in held if name in by_name and name not in HOLDING_LEFT_OUT and by_name[name][1]["rarity"] == HOLDING_RARITY),
-        key=lambda row: (-row[1], -row[2], row[0]),
-    )
-    cells = ['<tr class="hd"><td colspan="3"></td><td>持有率</td><td>平均潜能</td></tr>']
-    for name, owners, potential, char_id in rows:
+        if operator["rarity"] == STATS_RARITY and operator["name"] not in STATS_LEFT_OUT:
+            by_name.setdefault(operator["name"], char_id)  # alternative ids of one operator share one row
+    rows = []
+    for name, char_id in by_name.items():
+        owners, potential = held.get(name, (0, 0.0))
+        uses = used.get(name, 0)
+        if owners or uses:
+            rows.append((name, char_id, owners, potential, uses))
+    rows.sort(key=lambda row: (-row[4], -row[2], -row[3], row[0]))
+    cols = '<colgroup><col style="width:6%"><col style="width:7%"><col style="width:14%"><col style="width:21%"><col style="width:10%"><col style="width:10%"><col style="width:20%"><col style="width:12%"></colgroup>'
+    cells = ['<tr class="hd"><td colspan="3">干员</td><td colspan="2" class="g">持有率</td><td class="g">平均潜能</td><td colspan="2" class="g">出场率</td></tr>']
+    for i, (name, char_id, owners, potential, uses) in enumerate(rows, 1):
         src = await _icon(char_id)
+        own = owners / roles * 100 if roles else 0.0
+        use = uses / clears * 100 if clears else 0.0
         cells.append(
-            f'<tr><td class="ic">{f"<img src={chr(34)}{escape(src)}{chr(34)}>" if src else ""}</td><td class="nm">{escape(name)}</td>'
-            f'<td><div class="bar" style="width:{max(1, owners / total * 100):.0f}%"></div></td>'
-            f'<td class="pc">{owners / total * 100:.1f}%</td><td class="pt">{potential:.2f}</td></tr>'
+            f'<tr><td class="rk">{_rank(i)}</td><td class="ic">{f"<img src={chr(34)}{escape(src)}{chr(34)}>" if src else ""}</td><td class="nm">{escape(name)}</td>'
+            f'<td class="bw g"><div class="bar own" style="width:{max(1, own):.0f}%"></div></td><td class="pc">{f"{own:.1f}%" if roles else "—"}</td>'
+            f'<td class="pt g">{f"{potential:.2f}" if owners else "—"}</td>'
+            f'<td class="bw g"><div class="bar" style="width:{max(1, use):.0f}%"></div></td>'
+            f'<td class="pc">{f"{use:.1f}%" if clears else "—"}<small>{f"{uses} 次" if clears else ""}</small></td></tr>'
         )
-    return f'<div class="ef-sec"><h3>{HOLDING_RARITY}★ 干员<small class="cjk">{len(rows)} 位</small></h3><table>{"".join(cells)}</table></div>'
+    note = f"持有率 {roles} 个角色 · 出场率 {escape(scope)} {players} 位玩家 {clears} 条记录"
+    return f'<div class="ef-sec"><h3>{STATS_RARITY}★ 干员<small class="cjk">{note}</small></h3><table class="stats">{cols}{"".join(cells)}</table></div>'
 
 
-@holding_board.handle()
-async def _() -> None:
+@operator_stats.handle()
+async def _(arg: Message = CommandArg()) -> None:
+    endgame = _endgame()
+    scope = _usage_scope(endgame, arg.extract_plain_text().strip())
+    if scope is None:
+        await operator_stats.finish(f"没有找到「{arg.extract_plain_text().strip()}」\n{STATS_USAGE}")
+    keys, label = scope
     await _react(REACTION_PROCESSING)
     try:
-        total, held = build_store.holdings(echo_store.optout())
-        if not total:
+        optout = echo_store.optout()
+        roles, held = build_store.holdings(optout)
+        data = _load_echoes()
+        pool = set(data.get("members", {})) - optout  # every bound player, not just this group
+        clears, raw = usage_rates(data, pool, keys)
+        players = sum(1 for qq, m in data.get("members", {}).items() if qq in pool and any(k in keys for k in m.get("records", {})))
+        operators = wiki._resolver()[0]["operators"]
+        used = Counter()
+        for cid, n in raw.items():
+            used[operators.get(ENDMIN_IDS.get(cid, cid), {}).get("name", cid)] += n
+        if not roles and not clears:
             await _react(REACTION_DONE)
-            await holding_board.finish("持有率数据还在收集，请稍后再试")
-        body = await _holding_body(total, held)
-        image = await _board_page("终末地 · <em>6★ 干员持有率</em>", f"权限等级 {HOLDING_MIN_LEVEL} 级起的全部绑定角色（不分群）共 {total} 个，附持有者的平均潜能", body, HOLDING_FOOT, "Endfield · Operator Ownership")
+            await operator_stats.finish("干员统计数据还在收集，请稍后再试")
+        body = await _stats_body(roles, held, clears, used, label, players)
+        image = await _board_page("终末地 · <em>6★ 干员统计</em>", "全部绑定玩家（不分群）的持有率、持有者平均潜能和高难关卡出场率", body, STATS_FOOT, "Endfield · Operator Stats")
         await UniMessage.image(raw=image).send()
     except MatcherException:
         raise
     except Exception as e:
-        logger.warning(f"Holding board failed: {type(e).__name__}: {e}")
+        logger.warning(f"Operator stats failed: {type(e).__name__}: {e}")
         await _react(REACTION_FAIL)
-        await holding_board.finish("持有率生成失败，请稍后再试")
+        await operator_stats.finish("干员统计生成失败，请稍后再试")
     await _react(REACTION_DONE)
 
 

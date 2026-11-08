@@ -3,8 +3,7 @@
 Reuses Skland's binding lookup, token refresh and card API, then renders the account overview
 (stamina, missions, 据点 …) and every owned operator with weapon, skill levels and equipment in
 one image. Since 2026-10-14 this is /zmd开盒 itself: the plugin's own card and its "all" variant
-were retired (the all picture took twice as long to arrive), and the old /账号详情 names only
-point to /zmd开盒.
+were retired (the all picture took twice as long to arrive).
 """
 
 from __future__ import annotations
@@ -28,7 +27,6 @@ from nonebot.rule import Rule
 from nonebot.typing import T_State
 
 from plugins import ef_theme
-from plugins.strict_command import strict
 
 require("nonebot_plugin_skland")
 require("nonebot_plugin_htmlrender")
@@ -199,14 +197,6 @@ roster = on_command(
     priority=5,
     block=True,
 )
-moved = on_command("zmd账号详情", aliases={"ef账号详情", "终末地账号详情", "账号详情"}, rule=strict, priority=5, block=True)
-
-
-@moved.handle()
-async def _() -> None:
-    await moved.finish("账号详情已合并进 /zmd开盒：发送 /zmd开盒 查看自己，/zmd开盒 @某人 查看群友")
-
-
 async def _react(emoji: str) -> None:
     with contextlib.suppress(Exception):
         await message_reaction(emoji)

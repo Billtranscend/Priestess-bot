@@ -119,7 +119,7 @@ def stage_cover(group: dict, url: str) -> tuple[str, str, int]:
 # ── pages ──────────────────────────────────────────────────────────────
 
 ELEMENTS = ("物理", "灼热", "电磁", "寒冷", "自然")
-# Shared with the stage card of /攻略: the line of bonuses under an enemy row.
+# The line of bonuses under an enemy row.
 NOTES_CSS = """
 tr.bn td { border-top: 0; padding: 0 8px 9px; font-size: 13px; line-height: 1.7; color: var(--ef-sub); white-space: normal; }
 .bs { display: inline-block; margin-right: 18px; }
@@ -285,7 +285,7 @@ def overview_html(theme, monument: list[dict], covers: dict[str, str], now: floa
         theme.head("Arknights: Endfield · 影拓丰碑", "影拓丰碑", chips),
         f'<div class="grid">{"".join(cards)}</div>',
         f"关卡按游戏内从上到下的顺序排列并标注序号 · 发 /影拓丰碑 {escape(example)} 查看单个丰碑的关卡封面<br>"
-        f"只看机制和敌人属性发 /敌人 关卡名，完整攻略发 /攻略 关卡名 苦难 · 数据版本 {_version(version)}",
+        f"机制和敌人属性发 /敌人 关卡名 · 数据版本 {_version(version)}",
     )
 
 
@@ -301,8 +301,8 @@ def series_html(theme, series: dict, covers: dict[str, str], icons: dict[str, st
         theme,
         theme.head("Arknights: Endfield · 影拓丰碑", escape(series["name"]), chips),
         f'<div class="split">{side}<div class="rows">{rows}</div></div>',
-        f"顺序与游戏内从上到下一致，图标为苦难模式的敌人 · 只看机制和敌人属性发 /敌人 {escape(series['name'])}（或 /敌人 {escape(first)}）<br>"
-        f"完整攻略发 /攻略 {escape(first)} 苦难，也可以用序号：/攻略 {escape(series['name'])} 1 · 数据版本 {_version(version)}",
+        f"顺序与游戏内从上到下一致，图标为苦难模式的敌人 · 机制和敌人属性发 /敌人 {escape(series['name'])}（或 /敌人 {escape(first)}）<br>"
+        f"也可以用序号：/敌人 {escape(series['name'])} 1 · 本群用时排名发 /丰碑竞速 · 数据版本 {_version(version)}",
     )
 
 
@@ -323,8 +323,8 @@ def rotation_html(theme, season: dict, week: dict, groups: list[dict], upcoming:
         theme,
         theme.head("Arknights: Endfield · 战争回响", "战争回响 · <em>本期轮换</em>", chips),
         f'<div class="rows" style="margin-top:16px">{rows}</div>{later}',
-        f"顺序与游戏内一致，图标为残酷难度的敌人 · 只看机制和敌人属性发 /回响敌人（或 /敌人 {escape(first)}）<br>"
-        f"完整攻略发 /攻略 {escape(first)} 残酷 · 本群用时排名发 /回响竞速 · 数据版本 {_version(version)}",
+        f"顺序与游戏内一致，图标为残酷难度的敌人 · 机制和敌人属性发 /回响敌人（或 /敌人 {escape(first)}）<br>"
+        f"本群用时排名发 /回响竞速 · 数据版本 {_version(version)}",
     )
 
 
@@ -395,7 +395,7 @@ def enemies_html(theme, kicker: str, title: str, chips: str, groups: list[dict],
         theme.head(kicker, title, chips),
         "".join(sections) + f'<div class="note">{"；".join(notes)}</div>',
         ("多关一起看时只列出最高难度的机制，其他难度发 /敌人 关卡名 · " if brief else "")
-        + f"关卡数据 AKEData · 通关阵容和推荐视频见 /攻略 关卡名 · 数据版本 {_version(version)}",
+        + f"关卡数据 AKEData · 数据版本 {_version(version)}",
         ENEMY_NOTES,
         "数值怎么读",
     )
@@ -447,8 +447,7 @@ ENEMY_NOTES = (
 )
 MENU_NOTES = (
     "<b>/影拓丰碑 丰碑名</b>　该丰碑各关的封面与顺序　　<b>/战争回响</b>　本期轮换",
-    "<b>/敌人 关卡名 [难度]</b>　只看机制和敌人属性，也可写丰碑名或 丰碑名 序号",
-    "<b>/攻略 关卡名 [难度]</b>　完整攻略：机制、敌人、本群通关阵容、推荐视频",
+    "<b>/敌人 关卡名 [难度]</b>　机制和敌人属性，也可写丰碑名或 丰碑名 序号",
     "<b>/丰碑竞速</b>　<b>/回响竞速</b>　本群最快通关排名",
 )
 

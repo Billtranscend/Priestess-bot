@@ -46,7 +46,7 @@ def notice_lines(new_names: dict[str, list[str]]) -> list[str]:
         lines.append(f'现在就可以查：发送 /名称 查看资料卡，例如 {"、".join(examples)}')
     stage = next((new_names[kind][0].split("（")[0] for kind in ("战争回响", "影拓丰碑") if new_names.get(kind)), "")
     if stage:
-        lines.append(f"关卡发 /攻略 {stage} 看机制、敌人与阵容，/敌人 {stage} 只看敌人属性")
+        lines.append(f"关卡发 /敌人 {stage} 看机制和敌人属性")
     return lines
 
 

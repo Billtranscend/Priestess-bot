@@ -1,7 +1,6 @@
 """Import older Endfield gacha history from 小黑盒 (Heybox) "抽卡分析".
 
 /zmd导入小黑盒 <小黑盒ID>   rebuild the pools / periods the official API no longer returns
-/zmd撤销小黑盒导入          remove everything this command imported for the caller
 /mrfz导入小黑盒 <导出链接>   Arknights: paused (ARK_PAUSED), Heybox's export gives no link to paste. No request is made;
                             the import with replies is kept for when links can be had
 
@@ -15,6 +14,8 @@ turned into rows and which checks protect the data:
   - official rows are never changed; a pool is only extended backwards, and only when both
     sources agree where they overlap;
   - imported rows have a negative `pos`, so they are identifiable and removable.
+    (/zmd撤销小黑盒导入 was removed 2026-11-08: the UID check above means nothing wrong gets
+    imported, and nobody had used it.)
 
 The import is a function of (Heybox answer, official rows). Official rows can also arrive after
 an import: the first sync of a new binding, or pulls the nightly sync had not fetched yet. The
@@ -45,7 +46,6 @@ from nonebot.consts import PREFIX_KEY, RAW_CMD_KEY
 from nonebot.rule import Rule
 from nonebot.typing import T_State
 
-from plugins.strict_command import strict
 
 require("nonebot_plugin_htmlrender")
 require("nonebot_plugin_localstore")
@@ -72,7 +72,7 @@ from .plan import Official, Plan, build_plan
 __plugin_meta__ = PluginMetadata(
     name="Heybox gacha import",
     description="从小黑盒「抽卡分析」补回官方接口已无法拉取的终末地抽卡记录。",
-    usage="/zmd导入小黑盒 小黑盒ID  /zmd撤销小黑盒导入",
+    usage="/zmd导入小黑盒 小黑盒ID",
     type="application",
 )
 
@@ -100,7 +100,6 @@ async def _id_may_follow(event: Event, state: T_State) -> bool:
 
 
 import_cmd = on_command("zmd导入小黑盒", aliases={"终末地导入小黑盒", "ef导入小黑盒", "导入小黑盒"}, rule=Rule(_id_may_follow), priority=5, block=True)
-undo_cmd = on_command("zmd撤销小黑盒导入", aliases={"终末地撤销小黑盒导入", "ef撤销小黑盒导入", "撤销小黑盒导入"}, rule=strict, priority=5, block=True)
 _lock = asyncio.Lock()
 _last_run: dict[int, float] = {}
 WHERE_ID = "小黑盒 ID 是小黑盒 App 个人主页里的 ID 数字，不是游戏 UID"
@@ -374,7 +373,7 @@ def summary(plan: Plan) -> str:
             f"小黑盒导入完成：补回 {len(plan.imported)} 个卡池、{sum(p.pulls for p in plan.imported)} 抽、"
             f"{sum(p.six_stars for p in plan.imported)} 个六星，最早到 {datetime.fromtimestamp(first, CN):%Y-%m-%d}"
         )
-        lines.append("六星与每个六星的抽数来自小黑盒，四星不记具体干员；发 /zmd抽卡记录 查看，/zmd撤销小黑盒导入 可撤回")
+        lines.append("六星与每个六星的抽数来自小黑盒，四星不记具体干员；发 /zmd抽卡记录 查看")
     else:
         lines.append(
             f"小黑盒里没有比机器人已有记录更早的抽卡数据，无需导入（小黑盒 {plan.heybox_pulls} 抽，机器人已有 {plan.official_pulls} 抽）。"
@@ -436,20 +435,6 @@ async def _(event: MessageEvent, user_session: UserSession, session: async_scope
         await import_cmd.finish("导入时程序出错，没有写入任何数据。问题已记录，请稍后再试", at_sender=True)
     await _react(REACTION_FAIL if plan.error else REACTION_DONE)
     await UniMessage.text(summary(plan)).send(at_sender=True)
-
-
-@undo_cmd.handle()
-async def _(user_session: UserSession, session: async_scoped_session) -> None:
-    user_id = user_session.user_id
-    roles, reason = await _bound_roles(user_id, session)
-    if not roles:
-        await undo_cmd.finish(reason, at_sender=True)
-    role_ids = [role.id for role in roles]
-    removed = (await session.execute(delete(GachaRecord).where(GachaRecord.character_id.in_(role_ids), GachaRecord.pos < 0))).rowcount
-    await session.commit()
-    _last_run.pop(user_id, None)
-    await _react(REACTION_DONE)
-    await undo_cmd.finish(f"已撤销小黑盒导入，删除 {removed} 条导入记录；官方记录不受影响" if removed else "你没有从小黑盒导入过记录", at_sender=True)
 
 
 # ── Arknights: upstream's import, with replies ─────────────────────────

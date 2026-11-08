@@ -1,6 +1,6 @@
 """Shared rule: a command must be followed by the end, whitespace, or a non-text segment.
 
-Stops accidental triggers like "/欧非榜真好玩" while still accepting "/账号详情@某人",
+Stops accidental triggers like "/欧非榜真好玩" while still accepting "/zmd开盒@某人",
 where QQ often puts the @ segment directly after the command text.
 """
 

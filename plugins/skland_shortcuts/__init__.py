@@ -9,16 +9,23 @@ from dataclasses import dataclass
 from time import time_ns
 from typing import Any
 
-from nonebot import get_driver, logger, require
+from nonebot import get_driver, logger, on_command, require
 from nonebot.adapters.onebot.v11 import Bot as OneBotV11Bot
+from nonebot.permission import SUPERUSER
 from nonebot.plugin import PluginMetadata
 
+require("nonebot_plugin_orm")
+require("nonebot_plugin_user")
 require("nonebot_plugin_skland")
 
 from nonebot_plugin_alconna import add_global_extension, command_manager
 from nonebot_plugin_alconna.builtins.extensions.shortcut import (
     SuperUserShortcutExtension,
 )
+from nonebot_plugin_orm import async_scoped_session
+from nonebot_plugin_user import UserSession
+from nonebot_plugin_skland.commands.arksign import arksign_all_handler, arksign_status_handler
+from nonebot_plugin_skland.commands.endfield.sign import ef_sign_all_handler, ef_sign_status_handler
 from nonebot_plugin_skland.config import CACHE_DIR
 from nonebot_plugin_skland.matcher import skland, skland_command
 
@@ -57,14 +64,10 @@ CUSTOM_SHORTCUTS = (
     ShortcutSpec(r"(森空岛|skl|skd)角色", "skland char"),
     ShortcutSpec(r"(森空岛|skl|skd)切换(终末地|zmd|ef)角色", "skland char set ef", fuzzy=True),
     ShortcutSpec(r"(森空岛|skl|skd)切换(明日方舟|方舟|mrfz)角色", "skland char set ark", fuzzy=True),
-    ShortcutSpec(r"(终末地|zmd|ef)全体签到详情", "skland efsign status --all"),
-    ShortcutSpec(r"(终末地|zmd|ef)全体签到", "skland efsign all"),
     *_query(r"(终末地|zmd|ef)签到详情", "skland efsign status"),
     ShortcutSpec(r"(终末地|zmd|ef)签到", "skland efsign sign --all"),
     *_query(r"(终末地|zmd|ef)抽卡记录更新", "skland efgacha -u"),
     *_query(r"(终末地|zmd|ef)抽卡记录", "skland efgacha"),
-    ShortcutSpec(r"(明日方舟|方舟|mrfz)全体签到详情", "skland arksign status --all"),
-    ShortcutSpec(r"(明日方舟|方舟|mrfz)全体签到", "skland arksign all"),
     *_query(r"(明日方舟|方舟|mrfz)签到详情", "skland arksign status"),
     ShortcutSpec(r"(明日方舟|方舟|mrfz)签到", "skland arksign sign --all"),
     *_query(r"(明日方舟|方舟|mrfz)抽卡记录", "skland gacha"),
@@ -88,6 +91,8 @@ CONFLICTING_BUILTINS = (
     r"(ef|zmd)",
     "战争回响",  # 0.7.2 maps it to its own record card; here /战争回响 is the rotation page of endfield_guide
     "森空岛角色",
+    "全体签到",  # 2026-11-08: /全体签到 and /全体签到详情 cover both games, see sign_all below
+    "全体签到详情",
 )
 
 # Shortcuts this plugin registered before; the shortcut cache keeps them, so they are removed by name.
@@ -106,6 +111,11 @@ RETIRED_SHORTCUTS = (
     r"(明日方舟|方舟|mrfz)查询" + ROLE,
     r"(明日方舟|方舟|mrfz)开盒",
     r"(明日方舟|方舟|mrfz)开盒" + ROLE,
+    # 2026-11-08: the per-game sign-all commands are one /全体签到 (/全体签到详情) for both games.
+    r"(终末地|zmd|ef)全体签到详情",
+    r"(终末地|zmd|ef)全体签到",
+    r"(明日方舟|方舟|mrfz)全体签到详情",
+    r"(明日方舟|方舟|mrfz)全体签到",
 )
 
 _SHORTCUT_EXTENSION_ID = "builtins.extensions.shortcut:SuperUserShortcutExtension"
@@ -242,3 +252,23 @@ async def _configure_shortcuts() -> None:
 
     _persist_shortcut_cache()
     logger.info(f"Configured {len(CUSTOM_SHORTCUTS)} reviewed Skland shortcuts")
+
+
+# ── /全体签到, /全体签到详情 (owner 2026-11-08): one command signs, or shows, every bound role of both games ──
+
+from plugins.strict_command import strict  # noqa: E402
+
+sign_all = on_command("全体签到", rule=strict, permission=SUPERUSER, priority=5, block=True)
+sign_all_status = on_command("全体签到详情", rule=strict, permission=SUPERUSER, priority=5, block=True)
+
+
+@sign_all.handle()
+async def _(bot: OneBotV11Bot, user_session: UserSession, session: async_scoped_session) -> None:
+    await arksign_all_handler(user_session, session, bot, True)
+    await ef_sign_all_handler(user_session, session, bot, True)
+
+
+@sign_all_status.handle()
+async def _(bot: OneBotV11Bot, user_session: UserSession, session: async_scoped_session) -> None:
+    await arksign_status_handler(user_session, session, bot, True, is_superuser=True)
+    await ef_sign_status_handler(user_session, session, bot, True, is_superuser=True)
