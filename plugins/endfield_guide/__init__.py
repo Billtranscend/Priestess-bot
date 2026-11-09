@@ -737,7 +737,7 @@ STATS_LEFT_OUT = {"管理员"}  # everyone starts with the Endministrator: it sa
 STATS_USAGE = "用法：/干员统计 [关卡名 | 战争回响 | 影拓丰碑]"
 STATS_FOOT = (
     f"持有率 = 持有该干员的角色数 ÷ 已统计角色数；绑定的所有森空岛账号和角色都计入，一人多号算多个，权限等级 {HOLDING_MIN_LEVEL} 级起；平均潜能只算持有者，范围 0–5<br>"
-    "出场率 = 带该干员的通关记录数 ÷ 通关记录总数，每条记录为一位玩家在一关的最快编队；可加 关卡名 / 战争回响 / 影拓丰碑 只看这部分关卡<br>"
+    "出场率 = 带该干员的通关记录数 ÷ 通关记录总数，每条记录为一位玩家在一关的最快编队；可加 关卡名 / 战争回响 / 影拓丰碑 只看这部分关卡；出场率的条以第一名为满格<br>"
     "只代表绑定了机器人的玩家；持有率每天 03:00 更新，出场率每天 05:30、17:30 起陆续更新；不想参与可发送 /攻略统计 退出"
 )
 
@@ -771,6 +771,7 @@ async def _stats_body(roles: int, held: dict[str, tuple[int, float]], clears: in
         if owners or uses:
             rows.append((name, char_id, owners, potential, uses))
     rows.sort(key=lambda row: (-row[4], -row[2], -row[3], row[0]))
+    top = max((row[4] for row in rows), default=0)  # usage bars run to the most used operator: a clear has four, so no one gets near 100%
     cols = '<colgroup><col style="width:6%"><col style="width:7%"><col style="width:14%"><col style="width:21%"><col style="width:10%"><col style="width:10%"><col style="width:20%"><col style="width:12%"></colgroup>'
     cells = ['<tr class="hd"><td colspan="3">干员</td><td colspan="2" class="g">持有率</td><td class="g">平均潜能</td><td colspan="2" class="g">出场率</td></tr>']
     for i, (name, char_id, owners, potential, uses) in enumerate(rows, 1):
@@ -781,7 +782,7 @@ async def _stats_body(roles: int, held: dict[str, tuple[int, float]], clears: in
             f'<tr><td class="rk">{_rank(i)}</td><td class="ic">{f"<img src={chr(34)}{escape(src)}{chr(34)}>" if src else ""}</td><td class="nm">{escape(name)}</td>'
             f'<td class="bw g"><div class="bar own" style="width:{max(1, own):.0f}%"></div></td><td class="pc">{f"{own:.1f}%" if roles else "—"}</td>'
             f'<td class="pt g">{f"{potential:.2f}" if owners else "—"}</td>'
-            f'<td class="bw g"><div class="bar" style="width:{max(1, use):.0f}%"></div></td>'
+            f'<td class="bw g"><div class="bar" style="width:{max(1, uses / top * 100) if top else 1:.0f}%"></div></td>'
             f'<td class="pc">{f"{use:.1f}%" if clears else "—"}<small>{f"{uses} 次" if clears else ""}</small></td></tr>'
         )
     note = f"持有率 {roles} 个角色 · 出场率 {escape(scope)} {players} 位玩家 {clears} 条记录"
