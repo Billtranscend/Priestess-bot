@@ -172,8 +172,9 @@ def _arknights() -> dict:
     ]
     images = index.get("pool_images") or {}
     pool_rows = [
-        {"key": p["id"], "name": p["name"], "kind": p["kind"], "up": p["up"], "start": moment(p["start"]), "end": moment(p["end"]), "art": images.get(p["id"], "")}
+        {"key": p["id"], "name": p["name"], "kind": p["kind"], "up": p["up"], "note": p.get("note", ""), "start": moment(p["start"]), "end": moment(p["end"]), "art": images.get(p["id"], "")}
         for p in index.get("pools") or []
+        if p["up"] or p.get("note")  # no fixed UP and nothing listed (中坚甄选, UP not out yet): left out
     ]
     return {"activities": _unique(rows), "pools": pool_rows, "source": "ArknightsGameResource 游戏解包与 PRTS Wiki"}
 
@@ -228,9 +229,12 @@ def _span(delta: timedelta) -> str:
     return f"{hours} 小时 {minutes % 60} 分" if hours else f"{minutes % 60} 分钟"
 
 
+FAR_END = timedelta(days=5 * 365)  # a deadline further away than this is no deadline
+
+
 def _deadline(end: datetime | None, now: datetime) -> str:
     """Right-hand cell of a row: the deadline, and how long is left."""
-    if end is None:
+    if end is None or end - now > FAR_END:  # 卫戍协议:规程 now closes in 2099: open for good
         return '<div class="dl"><b class="perm">常驻开放</b></div>'
     left = end - now
     return f'<div class="dl"><b>{_moment(end)} 截止</b><span class="{"hot" if left < SOON else ""}">还剩 {_span(left)}</span></div>'
@@ -263,7 +267,8 @@ def _upcoming_rows(theme, items: list[dict], now: datetime, art: dict[str, str])
 def _pool_rows(theme, items: list[dict], now: datetime, art: dict[str, str]) -> str:
     rows = ""
     for p in items:
-        up = f'<small>UP：{escape("、".join(p["up"]))}</small>' if p["up"] else ""
+        note = "UP：" + "、".join(p["up"]) if p["up"] else p.get("note", "")  # no fixed UP: the operators the pool lists
+        up = f"<small>{escape(note)}</small>" if note else ""
         if p["start"] > now:
             right = f'<div class="dl"><b>{_moment(p["start"])} 开启</b><span>{_moment(p["end"])} 截止</span></div>'
         else:

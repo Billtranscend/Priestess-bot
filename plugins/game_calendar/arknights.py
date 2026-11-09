@@ -80,6 +80,14 @@ def _kind(activity_type: str, replicate: bool, activity_id: str = "") -> str:
     return f"{label}·复刻" if replicate and label == "活动" else label
 
 
+def _pool_note(row: dict, names: dict[str, str]) -> str:
+    """The 6-star operators a pool without fixed UP lists in its dynMeta (the 2026 感谢庆典 pool, rule type 12).
+    Empty otherwise: such pools are not shown (owner, 2026-11-09: 中坚甄选 picks and unpublished UP are left out)."""
+    listed = [names.get(char_id, "") for char_id in (row.get("dynMeta") or {}).get("charIdList") or []]
+    listed = [name for name in listed if name]
+    return f"6★：{'、'.join(listed)}" if listed else ""
+
+
 def build(activity_table: dict, gacha_table: dict, pool_details: dict | None, names: dict[str, str], now: float) -> tuple[list[dict], list[dict]]:
     """(activities, pools) from the game tables: what is running, about to start, or ended recently."""
     activities = [
@@ -100,7 +108,8 @@ def build(activity_table: dict, gacha_table: dict, pool_details: dict | None, na
         if not kind or not start or end <= now - KEEP_ENDED or end - start > PERMANENT:
             continue
         name = row.get("gachaPoolName") or ""
-        pools.append({"id": row["gachaPoolId"], "name": kind if not name or name == GENERIC_POOL_NAME else name, "kind": kind, "up": up.get(row["gachaPoolId"], []), "start": start, "end": end})
+        pools.append({"id": row["gachaPoolId"], "name": kind if not name or name == GENERIC_POOL_NAME else name, "kind": kind, "up": up.get(row["gachaPoolId"], []),
+                      "note": _pool_note(row, names), "start": start, "end": end})
     return sorted(activities, key=lambda a: a["start"]), sorted(pools, key=lambda p: p["start"])
 
 
@@ -272,7 +281,8 @@ async def refresh(cache_file: Path, character_table: Path) -> str:
         response = await client.get(VERSION_URL)
         response.raise_for_status()
         version = response.text.strip()
-        if cached.get("version") != version or "game_activities" not in cached or now - cached.get("fetched", 0) >= MAX_AGE:
+        if (cached.get("version") != version or "game_activities" not in cached or now - cached.get("fetched", 0) >= MAX_AGE
+                or any("note" not in pool for pool in cached.get("pools") or [])):  # an index from before pool notes
             tables = []
             for url in (ACTIVITY_URL, GACHA_URL):
                 response = await client.get(url)
