@@ -16,6 +16,7 @@ import asyncio
 import json
 import operator
 import re
+from datetime import datetime
 import shutil
 from collections import Counter
 from html import escape
@@ -75,7 +76,7 @@ TABLES = (
     "ActivityWeeklyTaskTable",
     "ActivityWeeklyTaskMileStoneTable",
 )
-INDEX_SCHEMA = 24  # bump to force a rebuild when the index layout changes (18: leader enemies, 19: logistics skills, 20: loose equipment, 21: gacha pools, 22: 增辉 conditions, 23: game rich-text colours and term icons, 24: <#term> styles from HyperlinkTextTable)
+INDEX_SCHEMA = 25  # bump to force a rebuild when the index layout changes (25: activity close from the in-game calendar stages, shop_close; 18: leader enemies, 19: logistics skills, 20: loose equipment, 21: gacha pools, 22: 增辉 conditions, 23: game rich-text colours and term icons, 24: <#term> styles from HyperlinkTextTable)
 EXTRA_GOAL_FILES = ("GameplayConfig/SubGameInstanceDataTable.json", "GameplayConfig/ScriptTaskExtraInfoTable.json")
 # Pool `type` of the gacha tables -> nonebot-plugin-skland's pool_type. 新手 (1) and 常驻 (2) are left out, as in its own table.
 CHAR_POOL_TYPES = {0: "special", 3: "extra", 4: "rerun"}
@@ -1020,12 +1021,29 @@ def build_calendar(load, text) -> dict:
                 return spans[0]["openTime"], spans[0].get("closeTime", "")
         return None
 
+    def stamp(value: str) -> datetime | None:
+        try:
+            return datetime.strptime(value, "%Y/%m/%d %H:%M:%S")
+        except (TypeError, ValueError):
+            return None
+
+    def calendar_close(activity_id: str) -> str:
+        """The end the in-game 活动日历 shows: its last stage (time_<id>_stage_<n>calendar). 危机合约 battles end
+        with the version, then only its shop (机密圣所) stays open until the activity closes (owner, 2026-11-10)."""
+        pattern = re.compile(rf"time_{re.escape(activity_id)}_stage_\d+calendar")
+        closes = [span[1] for time_id in ranges if pattern.fullmatch(time_id) and (span := window(time_id)) and stamp(span[1])]
+        return max(closes, key=stamp, default="")
+
     activities = []
     for activity_id, row in load("ActivityTable").items():
         span, name = window(row.get("timeId", "")), text(row.get("name"))
         if span and name:
             # tab / colour: the banner the game shows on the activity's tab (sprites/activity/<tab>.png) and its accent colour
-            activities.append({"id": activity_id, "name": name, "open": span[0], "close": span[1], "tab": row.get("tabImg") or "", "color": row.get("tabImgColor") or ""})
+            entry = {"id": activity_id, "name": name, "open": span[0], "close": span[1], "tab": row.get("tabImg") or "", "color": row.get("tabImgColor") or ""}
+            staged = calendar_close(activity_id)
+            if staged and stamp(span[1]) and stamp(staged) < stamp(span[1]):
+                entry.update(close=staged, shop_close=span[1])  # what is left after the calendar's end is the exchange only
+            activities.append(entry)
 
     pools = []
     for kind, table, up_key, names in (("char", "GachaCharPoolTable", "upCharIds", chars), ("weapon", "GachaWeaponPoolTable", "upWeaponIds", items)):

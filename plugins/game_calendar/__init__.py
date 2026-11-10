@@ -146,7 +146,7 @@ def _endfield() -> dict:
             tab, color = row.get("tab") or "", row.get("color") or ""
             rows.append(
                 {
-                    "name": row["name"], "kind": kind, "start": start, "end": _parse(row.get("close", "")),
+                    "name": row["name"], "kind": kind, "start": start, "end": _parse(row.get("close", "")), "shop_end": _parse(row.get("shop_close", "")),
                     "art": wiki_data.activity_banner_url(tab) if SPRITE_NAME.fullmatch(tab) else "",
                     "color": color if COLOR.fullmatch(color) else "",
                 }
@@ -232,12 +232,13 @@ def _span(delta: timedelta) -> str:
 FAR_END = timedelta(days=5 * 365)  # a deadline further away than this is no deadline
 
 
-def _deadline(end: datetime | None, now: datetime) -> str:
-    """Right-hand cell of a row: the deadline, and how long is left."""
+def _deadline(end: datetime | None, now: datetime, shop_end: datetime | None = None) -> str:
+    """Right-hand cell of a row: the deadline, and how long is left (and until when its shop still exchanges)."""
     if end is None or end - now > FAR_END:  # 卫戍协议:规程 now closes in 2099: open for good
         return '<div class="dl"><b class="perm">常驻开放</b></div>'
     left = end - now
-    return f'<div class="dl"><b>{_moment(end)} 截止</b><span class="{"hot" if left < SOON else ""}">还剩 {_span(left)}</span></div>'
+    shop = f'<span>兑换至 {_moment(shop_end)}</span>' if shop_end else ""
+    return f'<div class="dl"><b>{_moment(end)} 截止</b><span class="{"hot" if left < SOON else ""}">还剩 {_span(left)}</span>{shop}</div>'
 
 
 def _art_box(src: str, kind: str = "") -> str:
@@ -253,7 +254,7 @@ def _row(theme, activity: dict, right: str, art: dict[str, str]) -> str:
 
 
 def _open_rows(theme, items: list[dict], now: datetime, art: dict[str, str]) -> str:
-    return "".join(_row(theme, a, _deadline(a["end"], now), art) for a in items)
+    return "".join(_row(theme, a, _deadline(a["end"], now, a.get("shop_end")), art) for a in items)
 
 
 def _upcoming_rows(theme, items: list[dict], now: datetime, art: dict[str, str]) -> str:
