@@ -81,7 +81,8 @@ OVERVIEW_PATH = "/game/endfield/player/overview"
 USER_AGENT = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
 DATA_DIR = store.get_plugin_data_dir()
 COOLDOWN = 300
-FETCH_TIMEOUT = 15000  # ms per attempt
+FETCH_TIMEOUT = 15000  # ms for the page itself
+ANSWER_TIMEOUT = 25000  # ms until the data arrives (normally ~7 s: the scripts load one after another)
 FETCH_ATTEMPTS = 3
 RECONCILE_DELAY = 10  # s after an official row is flushed; its transaction has to commit first
 RECONCILE_ATTEMPTS = 3
@@ -131,9 +132,40 @@ async def _react(emoji: str) -> None:
         await message_reaction(emoji)
 
 
+class HeyboxRefused(Exception):
+    """Heybox answered, but not with the data (its own message, if any, is the argument)."""
+
+
+# Heybox's script CDN resolves to two addresses and one of them stopped answering from this host
+# (2026-11-10: every script hung, Chromium does not try the other address). httpx tries each address
+# in turn, so the page's scripts from that host are fetched here and handed to the page.
+CDN_HOST = "static.max-c.com"
+DROPPED_HEADERS = {"content-encoding", "content-length", "transfer-encoding", "connection"}
+
+
+def _via(client: httpx.AsyncClient):
+    """Route handler: one kept-alive client per load (the scripts load one after another; a new
+    connection each took ~1.5 s, about 15 s in all, against ~7 s with one)."""
+
+    async def handle(route) -> None:
+        try:
+            response = await client.get(route.request.url, headers={"User-Agent": USER_AGENT, "Referer": "https://www.xiaoheihe.cn/"})
+        except httpx.HTTPError:
+            await route.continue_()  # let the browser try itself
+            return
+        headers = {k: v for k, v in response.headers.items() if k.lower() not in DROPPED_HEADERS}
+        await route.fulfill(status=response.status_code, headers=headers, body=response.content)
+
+    return handle
+
+
 async def _fetch_once(heybox_id: str) -> dict:
-    async with get_new_page(device_scale_factor=1, viewport={"width": 430, "height": 900}, user_agent=USER_AGENT) as page:
-        async with page.expect_response(lambda r: OVERVIEW_PATH in r.url, timeout=FETCH_TIMEOUT) as waiter:
+    async with (
+        httpx.AsyncClient(timeout=FETCH_TIMEOUT / 1000, follow_redirects=True) as client,
+        get_new_page(device_scale_factor=1, viewport={"width": 430, "height": 900}, user_agent=USER_AGENT) as page,
+    ):
+        await page.route(f"https://{CDN_HOST}/**", _via(client))
+        async with page.expect_response(lambda r: OVERVIEW_PATH in r.url, timeout=ANSWER_TIMEOUT) as waiter:
             await page.goto(TOOL_URL.format(heybox_id=heybox_id), wait_until="domcontentloaded", timeout=FETCH_TIMEOUT)
         response = await waiter.value
         return await response.json()
@@ -154,7 +186,7 @@ async def fetch_overview(heybox_id: str) -> dict:
             logger.info(f"Heybox fetch attempt {attempt + 1} failed: {type(e).__name__}")
             continue
         if payload.get("status") != "ok":
-            raise RuntimeError(f"heybox status {payload.get('status')}")
+            raise HeyboxRefused(str(payload.get("msg") or "").strip()[:60])
         return payload.get("result") or {}
     raise last or RuntimeError("heybox fetch failed")
 
@@ -363,6 +395,16 @@ if _after_official_sync not in auto_gacha.sync_listeners:
     auto_gacha.sync_listeners.append(_after_official_sync)
 
 
+def fetch_failure_text(error: Exception) -> str:
+    """The reason a member is told when Heybox could not be read (owner, 2026-11-10: a bare failure reaction is not enough)."""
+    if isinstance(error, HeyboxRefused):
+        said = f"：{error.args[0]}" if error.args and error.args[0] else ""
+        return f"导入失败：小黑盒拒绝了这次查询{said}，没有写入任何数据。请过几分钟再试"
+    if isinstance(error, (TimeoutError, httpx.TimeoutException)) or "Timeout" in type(error).__name__:
+        return "导入失败：小黑盒的网页连续 3 次没有加载出来，是小黑盒那边响应慢，还没走到核对小黑盒 ID 那一步。没有写入任何数据，请过几分钟再试"
+    return f"导入失败：读取小黑盒数据时出错（{type(error).__name__}），没有写入任何数据。请过几分钟再试，一直失败请联系管理员"
+
+
 def summary(plan: Plan) -> str:
     if plan.error:
         return f"导入失败：{plan.error}"
@@ -410,9 +452,9 @@ async def _(event: MessageEvent, user_session: UserSession, session: async_scope
             try:
                 result = await fetch_overview(heybox_id)
             except Exception as e:
-                logger.warning(f"Heybox fetch failed: {type(e).__name__}: {e}")
+                logger.warning(f"Heybox fetch failed: {type(e).__name__}: {str(e).splitlines()[0][:120] if str(e) else ''}")  # Playwright's call log names the Heybox id
                 await _react(REACTION_FAIL)
-                await import_cmd.finish("从小黑盒读取数据失败，请稍后再试", at_sender=True)
+                await import_cmd.finish(fetch_failure_text(e), at_sender=True)
             # The Heybox account names its role; the import goes to that role, whichever of the member's it is.
             heybox_uid = str((result.get("user_info") or {}).get("uid"))
             character = next((role for role in roles if str(role.role_id) == heybox_uid), roles[0])
