@@ -76,7 +76,7 @@ TABLES = (
     "ActivityWeeklyTaskTable",
     "ActivityWeeklyTaskMileStoneTable",
 )
-INDEX_SCHEMA = 25  # bump to force a rebuild when the index layout changes (25: activity close from the in-game calendar stages, shop_close; 18: leader enemies, 19: logistics skills, 20: loose equipment, 21: gacha pools, 22: 增辉 conditions, 23: game rich-text colours and term icons, 24: <#term> styles from HyperlinkTextTable)
+INDEX_SCHEMA = 26  # bump to force a rebuild when the index layout changes (26: new stages of permanent activities; 25: activity close from the in-game calendar stages, shop_close; 18: leader enemies, 19: logistics skills, 20: loose equipment, 21: gacha pools, 22: 增辉 conditions, 23: game rich-text colours and term icons, 24: <#term> styles from HyperlinkTextTable)
 EXTRA_GOAL_FILES = ("GameplayConfig/SubGameInstanceDataTable.json", "GameplayConfig/ScriptTaskExtraInfoTable.json")
 # Pool `type` of the gacha tables -> nonebot-plugin-skland's pool_type. 新手 (1) and 常驻 (2) are left out, as in its own table.
 CHAR_POOL_TYPES = {0: "special", 3: "extra", 4: "rerun"}
@@ -1043,6 +1043,11 @@ def build_calendar(load, text) -> dict:
             staged = calendar_close(activity_id)
             if staged and stamp(span[1]) and stamp(staged) < stamp(span[1]):
                 entry.update(close=staged, shop_close=span[1])  # what is left after the calendar's end is the exchange only
+            shown = window(row.get("recommendTime", ""))
+            if not span[1] and shown and stamp(shown[0]):
+                # A permanent activity with new stages (密境行者): listed as upcoming until they open, announced then,
+                # still without a close, so it never stays among the open ones (owner, 2026-11-10)
+                entry.update(name=f"{name}·新关卡", open=shown[0])
             activities.append(entry)
 
     pools = []

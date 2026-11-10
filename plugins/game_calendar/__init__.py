@@ -92,7 +92,7 @@ REACTION_PROCESSING, REACTION_DONE, REACTION_FAIL = "66", "144", "10060"
 ENDFIELD_KINDS = (
     ("activity_high_difficulty", "高难"), ("activity_stamina", "理智"), ("activity_checkin", "签到"), ("activity_char_trial", "试用"),
     ("characterguide", "干员"), ("web_", "网页"), ("activity_map", "探索"), ("activity_limited_formula", "制造"),
-    ("activity_submit", "物资"), ("activity_contingency", "合约"), ("activity_seasontower", "回响"),
+    ("activity_submit", "物资"), ("activity_contingency", "合约"), ("activity_seasontower", "回响"), ("activity_puzzle", "解谜"),
 )
 # What members may type before 活动 / 日历.
 ENDFIELD_WORDS = ("zmd", "终末地", "终末", "endfield", "ef")
