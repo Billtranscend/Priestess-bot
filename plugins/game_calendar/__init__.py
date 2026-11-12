@@ -70,6 +70,7 @@ CN = guide.CN
 WIDTH = 1000
 STATE_FILE = store.get_plugin_data_file("announced.json")
 ARKNIGHTS_FILE = store.get_plugin_data_file("arknights.json")
+RENDER = "#render"  # art key of a weapon's own picture
 POOL_ART_FILE = store.get_plugin_data_file("endfield_pools.json")  # pool id -> banner URL answers of the official pool page
 POOL_ART_AGE = 6 * 3600  # how long an answer (also "no banner yet") is kept
 POOL_CONTENT_URL = "https://ef-webview.hypergryph.com/api/content"  # the game's own pool page; public
@@ -155,8 +156,22 @@ def _endfield() -> dict:
     for row in calendar.get("pools") or []:
         start, end = _parse(row.get("open", "")), _parse(row.get("close", ""))
         if start and end:
-            pool_rows.append({"key": row.get("id", ""), "name": row["name"], "kind": "武器" if row.get("kind") == "weapon" else "角色", "up": row.get("up") or [], "start": start, "end": end})
-    return {"activities": _unique(rows), "pools": pool_rows, "source": f'AKEData 游戏解包（版本 {index.get("version", "")}）'}
+            pool_rows.append(
+                {"key": row.get("id", ""), "name": row["name"], "kind": "武器" if row.get("kind") == "weapon" else "角色", "up": row.get("up") or [], "start": start, "end": end, "link": row.get("link") or ""}
+            )
+    return {"activities": _unique(rows), "pools": _pair_reruns(pool_rows), "source": f'AKEData 游戏解包（版本 {index.get("version", "")}）'}
+
+
+def _pair_reruns(pool_rows: list[dict]) -> list[dict]:
+    """A rerun's weapon pool runs exactly with its character pool: one row for both (owner, 2026-11-13)."""
+    by_key = {p["key"]: p for p in pool_rows}
+    paired = []
+    for p in pool_rows:
+        char = by_key.get(p.get("link", ""))
+        if char and (char["start"], char["end"]) == (p["start"], p["end"]) and "weapon" not in char:
+            char["weapon"] = {"key": p["key"], "name": p["name"], "up": p["up"]}
+            paired.append(p)
+    return [p for p in pool_rows if p not in paired]
 
 
 def _arknights() -> dict:
@@ -269,14 +284,23 @@ def _pool_rows(theme, items: list[dict], now: datetime, art: dict[str, str]) -> 
     rows = ""
     for p in items:
         note = "UP：" + "、".join(p["up"]) if p["up"] else p.get("note", "")  # no fixed UP: the operators the pool lists
+        weapon = p.get("weapon")
+        if weapon:
+            note += f" · {weapon['name']}" + (f" UP：{'、'.join(weapon['up'])}" if weapon["up"] else "")
         up = f"<small>{escape(note)}</small>" if note else ""
         if p["start"] > now:
             right = f'<div class="dl"><b>{_moment(p["start"])} 开启</b><span>{_moment(p["end"])} 截止</span></div>'
         else:
             right = _deadline(p["end"], now)
         name = f'<b>{escape(p["name"])}</b>' if p["name"] != p["kind"] else ""
-        src = art.get(p["key"], "")
-        rows += f'<div class="row{" pic" if src else ""}"><div class="nm">{theme.tag(p["kind"], True)}{name}{up}</div>{_art_box(src, "pool")}{right}</div>'
+        tags = theme.tag(p["kind"], True)
+        src, box = art.get(p["key"], ""), ""
+        if weapon:
+            tags += theme.tag("武器", True)
+            render = art.get(weapon["key"] + RENDER, "")
+            box = f'<div class="duo">{_art_box(src, "pool")}<i class="wpn" style="background-image:url(\'{escape(render)}\')"></i></div>' if src and render else ""
+        box = box or _art_box(src, "pool")
+        rows += f'<div class="row{" pic" if src else ""}"><div class="nm">{tags}{name}{up}</div>{box}{right}</div>'
     return rows
 
 
@@ -377,30 +401,32 @@ def _pool_cache() -> dict:
         return {}
 
 
-async def _endfield_pool_url(pool_id: str) -> str:
-    """Banner of an Endfield pool: the table nonebot-plugin-skland keeps, else the game's own pool page (current pools only)."""
+async def _endfield_pool_url(pool_id: str, render: bool = False) -> str:
+    """Banner of an Endfield pool: the table nonebot-plugin-skland keeps, else the game's own pool page (current pools only).
+    render: the weapon's own picture instead (up6_banner of the pool page, transparent), for a rerun's paired row."""
     known = ef_gacha_pool_data.get_pool(pool_id) if getattr(ef_gacha_pool_data, "pool_table", None) else None
-    if known and (known.up6_image or known.rotate_image):
+    if not render and known and (known.up6_image or known.rotate_image):
         return known.up6_image or known.rotate_image
     cache = _pool_cache()
     answer = cache.get(pool_id)
-    if answer and time.time() - answer.get("ts", 0) < POOL_ART_AGE:
-        return answer.get("url", "")
-    url = ""
+    if answer and time.time() - answer.get("ts", 0) < POOL_ART_AGE and (not render or "render" in answer):
+        return answer.get("render" if render else "url", "")
+    url = render_url = ""
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             response = await client.get(POOL_CONTENT_URL, params={"lang": "zh-cn", "pool_id": pool_id, "server_id": "1"})
         pool = (response.json().get("data") or {}).get("pool") or {}
         url = pool.get("up6_image") or pool.get("rotate_image") or ""
+        render_url = pool.get("up6_banner") or ""
     except (httpx.HTTPError, ValueError):
         return ""  # not remembered: asked again next time
-    cache[pool_id] = {"url": url, "ts": time.time()}
+    cache[pool_id] = {"url": url, "render": render_url, "ts": time.time()}
     POOL_ART_FILE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     tmp = POOL_ART_FILE.with_suffix(".tmp")
     tmp.write_text(json.dumps(cache, ensure_ascii=False), "utf-8")
     tmp.chmod(0o600)
     tmp.replace(POOL_ART_FILE)
-    return url
+    return render_url if render else url
 
 
 async def _pool_banners(game: Game, pool_rows: list[dict]) -> dict[str, str]:
@@ -409,9 +435,14 @@ async def _pool_banners(game: Game, pool_rows: list[dict]) -> dict[str, str]:
         urls = [await _endfield_pool_url(p["key"]) for p in pool_rows]  # one at a time: each answer is added to the same cache file
     else:
         urls = [p.get("art", "") for p in pool_rows]
-    wanted = [(p, url) for p, url in zip(pool_rows, urls) if url and url.startswith("https://")]
+    keys = [p["key"] for p in pool_rows]
+    for p in pool_rows:
+        if game.key == "endfield" and p.get("weapon"):
+            keys.append(p["weapon"]["key"] + RENDER)
+            urls.append(await _endfield_pool_url(p["weapon"]["key"], render=True))
+    wanted = [(key, url) for key, url in zip(keys, urls) if url and url.startswith("https://")]
     sources = await asyncio.gather(*(_banner(url) for _, url in wanted))
-    return {p["key"]: src for (p, _), src in zip(wanted, sources) if src}
+    return {key: src for (key, _), src in zip(wanted, sources) if src}
 
 
 async def calendar_picture(game: Game, now: datetime) -> bytes:

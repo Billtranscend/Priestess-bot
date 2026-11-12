@@ -56,6 +56,9 @@ body { width: %dpx; padding: 26px; }
 .row.tint { border-left: 6px solid var(--c); padding-left: 10px; }
 /* pool banners are wide strips with the subject on the right: show that end, faded on the left */
 .row .art.pool { width: 460px; background-size: auto 100%%; -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 34%%); }
+/* a rerun with its weapon pool: the weapon's picture stands on the faded left end of the character banner */
+.row .duo { flex: none; align-self: stretch; position: relative; display: flex; }
+.row .duo .wpn { position: absolute; left: -70px; top: -14px; bottom: -14px; width: 200px; background: center / contain no-repeat; filter: drop-shadow(0 3px 5px rgba(0,0,0,.35)); }
 /* opening notice */
 .hero { position: relative; overflow: hidden; margin-top: 16px; background: var(--ef-panel); border: 2px solid var(--ef-ink); border-left: 12px solid var(--ef-yellow); padding: 18px 22px 20px; }
 .hero .art { position: absolute; right: 16px; top: 8px; width: 270px; height: 116px; background: right center / auto 100%% no-repeat; }

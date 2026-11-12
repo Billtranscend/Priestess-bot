@@ -76,7 +76,7 @@ TABLES = (
     "ActivityWeeklyTaskTable",
     "ActivityWeeklyTaskMileStoneTable",
 )
-INDEX_SCHEMA = 26  # bump to force a rebuild when the index layout changes (26: new stages of permanent activities; 25: activity close from the in-game calendar stages, shop_close; 18: leader enemies, 19: logistics skills, 20: loose equipment, 21: gacha pools, 22: 增辉 conditions, 23: game rich-text colours and term icons, 24: <#term> styles from HyperlinkTextTable)
+INDEX_SCHEMA = 27  # bump to force a rebuild when the index layout changes (27: rerun weapon pools take the window of their character pool, link; 26: new stages of permanent activities; 25: activity close from the in-game calendar stages, shop_close; 18: leader enemies, 19: logistics skills, 20: loose equipment, 21: gacha pools, 22: 增辉 conditions, 23: game rich-text colours and term icons, 24: <#term> styles from HyperlinkTextTable)
 EXTRA_GOAL_FILES = ("GameplayConfig/SubGameInstanceDataTable.json", "GameplayConfig/ScriptTaskExtraInfoTable.json")
 # Pool `type` of the gacha tables -> nonebot-plugin-skland's pool_type. 新手 (1) and 常驻 (2) are left out, as in its own table.
 CHAR_POOL_TYPES = {0: "special", 3: "extra", 4: "rerun"}
@@ -1051,18 +1051,26 @@ def build_calendar(load, text) -> dict:
             activities.append(entry)
 
     pools = []
+    char_pools = load("GachaCharPoolTable")
     for kind, table, up_key, names in (("char", "GachaCharPoolTable", "upCharIds", chars), ("weapon", "GachaWeaponPoolTable", "upWeaponIds", items)):
         for pool_id, row in load(table).items():
             suffix = re.search(r"(\d+_\d+_\d+)$", row.get("nameImage") or "")
+            link = ""
+            if kind == "weapon" and pool_id.startswith("rerun_wpn_"):
+                # 细枝申领 (rerun_wpn_tangtang) has no time of its own: it runs with its character rerun (rerun_chr_tangtang,
+                # gachapool_titleicon_1_6_3 -> time_weaponbox_1_6_3); the official pool page names that pool too (owner, 2026-11-13)
+                link = "rerun_chr_" + pool_id.removeprefix("rerun_wpn_")
+                suffix = re.search(r"(\d+_\d+_\d+)$", (char_pools.get(link) or {}).get("nameImage") or "")
             span = window(
                 f"time_{pool_id.replace('weponbox', 'weaponbox')}",
                 row.get("clientTopTimeId", ""),
                 f"time_rerun_{suffix.group(1)}" if suffix else "",
+                f"time_weaponbox_{suffix.group(1)}" if suffix and link else "",
             )
             if not span or not span[1]:  # permanent pools (standard, beginner, constant weapon boxes)
                 continue
             up = [text(names.get(i, {}).get("name")) or i for i in row.get(up_key) or []]
-            pools.append({"id": pool_id, "kind": kind, "name": text(row.get("name")), "up": up, "open": span[0], "close": span[1]})
+            pools.append({"id": pool_id, "kind": kind, "name": text(row.get("name")), "up": up, "open": span[0], "close": span[1], "link": link if link in char_pools else ""})
 
     tasks, conditions = load("BattlePassTaskTable"), load("BattlePassConditionTable")
     passes = []
