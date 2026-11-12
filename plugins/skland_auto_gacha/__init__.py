@@ -36,6 +36,44 @@ from plugins.skland_pools import RERUN
 
 from .core import Queue, TZ, record_values
 
+# The record API pages 5 rows at a time, newest first. Reading every member's whole history each night
+# took ~110k requests and 8+ hours at ~600 members (2026-11-13), for a few hundred new pulls. Each pool
+# is now read from the newest page back to the first row already stored. Rows of a role are saved all at
+# once after every pool was read, so what is stored is always a complete newest-to-oldest stretch.
+# Safety net: every member is read in full on one day of the week (owner_id % 7), and what that finds
+# beyond the newest stretch is logged as `missed`.
+FULL_CHECK_DAYS = 7
+
+
+def full_check_due(owner_id: int, today) -> bool:
+    return owner_id % FULL_CHECK_DAYS == today.toordinal() % FULL_CHECK_DAYS
+
+
+def newest_stretch(records, known: set) -> list:
+    """The rows before the first stored one, newest first (what an incremental read returns)."""
+    stretch = []
+    for record in sorted(records, key=lambda r: r.seq_id_int, reverse=True):
+        if (record.gacha_ts_sec, record.seq_id_int) in known:
+            break
+        stretch.append(record)
+    return stretch
+
+
+async def new_ef_gacha_records(pool, server_id: str, role_token: str, known: set, fetch=None) -> list:
+    """Pages newest first until a page holds a stored row (or the history ends)."""
+    fetch = fetch or SklandAPI.get_ef_gacha_history
+    found, seq_id = [], None
+    while True:
+        page = await fetch(pool, server_id, role_token, seq_id)
+        rows = [r for r in page.gacha_list if seq_id is None or r.seq_id_int < int(seq_id)]
+        if not rows:
+            return found
+        fresh = [r for r in rows if (r.gacha_ts_sec, r.seq_id_int) not in known]
+        found.extend(fresh)
+        if len(fresh) < len(rows) or not page.hasMore:
+            return found
+        seq_id = str(min(r.seq_id_int for r in rows))
+
 __plugin_meta__ = PluginMetadata(
     name="Skland 自动终末地抽卡同步", description="绑定后同步及北京时间每天 01:00 更新",
     usage="绑定后后台更新；/zmd抽卡记录 查看缓存；手动 -u 仍可用。", type="application",
@@ -134,6 +172,14 @@ async def sync_user(owner_id: int) -> tuple[str, int]:
             .join(Character.account).where(SkUser.owner_id == owner_id, Character.app_code == "endfield")
             .order_by(Character.account_id, Character.id))).all()
     tokens = dict(accounts)
+    async with get_session() as session:
+        stored = (await session.execute(
+            select(GachaRecord.character_id, GachaRecord.gacha_ts, GachaRecord.pos)
+            .where(GachaRecord.character_id.in_([role.id for role in roles]), GachaRecord.pos > 0))).all()
+    known_by_role: dict[int, set] = {}
+    for character_id, gacha_ts, pos in stored:
+        known_by_role.setdefault(character_id, set()).add((gacha_ts, pos))
+    full = full_check_due(owner_id, datetime.now(TZ).date())
     # A Skland account can carry a second Endfield binding that has no role in it. The record
     # API rejects it ("Token is invalid"), which used to fail the member's real role as well.
     roles = [role for role in roles if role.role_id]
@@ -150,11 +196,22 @@ async def sync_user(owner_id: int) -> tuple[str, int]:
                 grants[role.account_id] = await SklandLoginAPI.get_grant_code(token, 1)
             role_token = await SklandLoginAPI.get_role_token_by_uid(role.uid, grants[role.account_id])
             records = {}
+            known = known_by_role.get(role.id, set())
+            missed = 0
             for pool in POOL_TYPES:
-                for record in await get_all_ef_gacha_records(role.channel_master_id, pool, role_token, concurrency=1):
+                if full or not known:
+                    fetched = await get_all_ef_gacha_records(role.channel_master_id, pool, role_token, concurrency=1)
+                    if known:
+                        stretch = {(r.gacha_ts_sec, r.seq_id_int) for r in newest_stretch(fetched, known)}
+                        missed += sum(1 for r in fetched if (r.gacha_ts_sec, r.seq_id_int) not in known and (r.gacha_ts_sec, r.seq_id_int) not in stretch)
+                else:
+                    fetched = await new_ef_gacha_records(pool, role.channel_master_id, role_token, known)
+                for record in fetched:
                     values = record_values(role.id, record)
                     records[(values["gacha_ts"], values["pos"])] = values
                 await asyncio.sleep(0.5)
+            if full and known:
+                logger.info("auto-efgacha full_check missed={}", missed)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
