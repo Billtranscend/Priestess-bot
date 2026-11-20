@@ -1,0 +1,318 @@
+"""上游明日方舟页面（/方舟干员、/sk 卡片）里远程图片的本地副本。
+
+截图要等页面上每张图片加载完。上游有好几类图片指向外部主机：稀有度装饰和模组图标在 PRTS wiki，
+还没缓存的皮肤立绘和技能图标在鹰角的 CDN。只要其中一个主机慢，/方舟干员 的每一页都会撞上 30 秒的
+上限，排不排队都一样。
+
+上游每个导入了这些 URL 辅助函数的模块里，它们都被替换掉，现在只返回本地文件：已缓存的直接用；
+还没缓存的在后台下载到上游用的同一个缓存里，页面不等它就画（皮肤立绘退回到干员的默认立绘，
+模组或技能图标这一次先不显示；还没到的图片是一个透明像素，而不是破图标记）。启动时，
+图鉴里每个干员的稀有度装饰、模组图标和默认立绘（精英 0 和精英 2）缺了就下载：上游的缓存只在
+安装时填过一次，所以较新的干员没有可退回的立绘。同样的检查每 PREFETCH_HOURS 小时跑一次，
+游戏更新加入的干员和模组在有人查之前就已经就位。
+
+和 /mrfz开盒 一样，/方舟干员 不会在图片还缺着的时候出图：上游渲染干员列表的一页之前，先下载
+这一页里还没缓存的立绘、技能图标和模组图标（最多等 ENSURE_TIMEOUT；之后还在下载的放到后台完成）。
+
+/mrfz抽卡记录 页面上的干员头像也是同样处理。id 取自抽卡记录，所以当天游戏更新的干员在图鉴收录之前
+就已覆盖。实在拿不到的图片会留下模板里的灰色方块，而不是整页失败；AVATAR_RETRY 之后再去请求。
+"""
+
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import time
+from pathlib import Path
+from urllib.parse import quote
+
+import httpx
+from nonebot import get_driver, logger, require
+
+require("nonebot_plugin_skland")
+require("nonebot_plugin_apscheduler")
+
+from nonebot_plugin_apscheduler import scheduler
+
+from nonebot_plugin_skland import filters, render
+from nonebot_plugin_skland.commands import box
+from nonebot_plugin_skland.commands import gacha as gacha_command
+from nonebot_plugin_skland.config import CACHE_DIR
+from nonebot_plugin_skland.schemas.arknights import card as card_module
+from nonebot_plugin_skland.schemas.arknights import operators
+from nonebot_plugin_skland.schemas.arknights.models import assist_chars, chars
+
+ASSETS = CACHE_DIR / "ark_assets"
+UNIEQUIP_URL = "https://torappu.prts.wiki/assets/uniequip_direction/{}.png"  # 同上游的 ark_uniequip_icon_url
+PORTRAIT_URL = "https://web.hycdn.cn/arknights/game/assets/char_skin/portrait/{}.png"  # 同 ark_skin_portrait_url
+SKILL_URL = "https://web.hycdn.cn/arknights/game/assets/char_skill/{}.png"  # 同 ark_skill_icon_url
+AVATAR_URL = "https://web.hycdn.cn/arknights/game/assets/char/avatar/{}.png"  # 同 charId_to_avatarUrl
+AVATAR_RETRY = 300  # 下载失败的头像，隔多少秒后页面才会再等它
+TIMEOUT = 20
+ENSURE_TIMEOUT = 8  # 干员列表页面等待缺失图片的秒数
+PREFETCH_HOURS = 6
+MAX_BYTES = 10 * 1024 * 1024
+# 1x1 透明 PNG：没有图源的 <img> 会显示浏览器的破图标记
+BLANK = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+HEADERS = {"User-Agent": "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36"}
+
+_ORIGINAL = {
+    name: getattr(filters, name)
+    for name in ("ark_skin_portrait_url", "ark_skill_icon_url", "ark_uniequip_icon_url", "charId_to_avatarUrl")
+}
+_DECO_SOURCES = {**{("lh", r): u for r, u in filters.ARK_ROSTER_LH_URLS.items()},
+                 **{("light", r): u for r, u in filters.ARK_ROSTER_LIGHT_URLS.items()}}
+_pending: set[Path] = set()
+_tasks: set[asyncio.Task] = set()
+
+
+def _uri(path: Path) -> str:
+    return path.as_uri() if path.is_file() else ""
+
+
+async def _download(url: str, path: Path) -> bool:
+    try:
+        return await _fetch(url, path)
+    finally:  # 失败的图片在本进程稍后还可以再请求
+        _pending.discard(path)
+
+
+async def _fetch(url: str, path: Path) -> bool:
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT, headers=HEADERS, follow_redirects=True) as client:
+            response = await client.get(url)
+    except httpx.HTTPError:
+        return False
+    data = response.content
+    if response.status_code != 200 or not data.startswith(b"\x89PNG") or len(data) > MAX_BYTES:
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_bytes(data)
+    tmp.replace(path)
+    return True
+
+
+def _later(url: str, path: Path) -> None:
+    """在后台下载到缓存，每个文件每个进程只下载一次；没有谁会等它。"""
+    if path in _pending:
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    _pending.add(path)
+    task = loop.create_task(_download(url, path))
+    _tasks.add(task)
+    task.add_done_callback(_tasks.discard)
+
+
+def _portrait_id(skin_id: str) -> str:
+    return next((skin_id.replace(symbol, "_", 1) for symbol in ("@", "#") if symbol in skin_id), skin_id)
+
+
+def ark_skin_portrait_url(skin_id: str) -> str:
+    path = CACHE_DIR / "portrait" / f"{_portrait_id(skin_id)}.png"
+    if path.is_file():
+        return path.as_uri()
+    _later(PORTRAIT_URL.format(quote(skin_id, safe="")), path)
+    char_id = skin_id.split("@", 1)[0].split("#", 1)[0]
+    return _uri(CACHE_DIR / "portrait" / f"{char_id}_1.png") or _uri(CACHE_DIR / "portrait" / f"{char_id}_2.png") or BLANK
+
+
+def _avatar_path(char_id: str) -> Path:
+    return CACHE_DIR / "avatar" / f"{_portrait_id(char_id)}.png"
+
+
+def charId_to_avatarUrl(char_id: str) -> str:
+    path = _avatar_path(char_id)
+    if path.is_file():
+        return path.as_uri()
+    _later(AVATAR_URL.format(quote(char_id, safe="")), path)
+    return BLANK
+
+
+def ark_skill_icon_url(skill_id: str) -> str:
+    path = CACHE_DIR / "skill" / f"skill_icon_{skill_id}.png"
+    if path.is_file():
+        return path.as_uri()
+    _later(SKILL_URL.format(quote(skill_id, safe="")), path)
+    return BLANK
+
+
+def _uniequip_path(type_icon: str) -> Path:
+    return ASSETS / "uniequip" / f"{type_icon.lower()}.png"
+
+
+def ark_uniequip_icon_url(type_icon: str | None) -> str:
+    if not type_icon:
+        return ""
+    path = _uniequip_path(type_icon)
+    if path.is_file():
+        return path.as_uri()
+    _later(UNIEQUIP_URL.format(quote(type_icon.lower(), safe="")), path)
+    return BLANK
+
+
+def _deco_path(url: str) -> Path:
+    return ASSETS / "deco" / f"{hashlib.sha256(url.encode()).hexdigest()[:16]}.png"
+
+
+def _point_deco_at_cache() -> None:
+    """装饰表里只放本地文件：启动时的下载拿到之前是空白。"""
+    for (kind, rarity), url in _DECO_SOURCES.items():
+        table = filters.ARK_ROSTER_LH_URLS if kind == "lh" else filters.ARK_ROSTER_LIGHT_URLS
+        table[rarity] = _uri(_deco_path(url)) or BLANK
+
+
+REPLACEMENTS = {
+    "ark_skin_portrait_url": ark_skin_portrait_url,
+    "ark_skill_icon_url": ark_skill_icon_url,
+    "ark_uniequip_icon_url": ark_uniequip_icon_url,
+    "charId_to_avatarUrl": charId_to_avatarUrl,
+}
+MODULES = (filters, render, operators, card_module, assist_chars, chars)
+for _module in MODULES:
+    for _name, _replacement in REPLACEMENTS.items():
+        if getattr(_module, _name, None) is _ORIGINAL[_name]:
+            setattr(_module, _name, _replacement)
+_point_deco_at_cache()
+
+
+def _page_jobs(props) -> dict[Path, str]:
+    """干员列表某一页里还没缓存的图片。"""
+    jobs: dict[Path, str] = {}
+    for card in props.cards:
+        skin = card.skin_id
+        if skin:
+            path = CACHE_DIR / "portrait" / f"{_portrait_id(skin)}.png"
+            if not path.is_file():
+                jobs[path] = PORTRAIT_URL.format(quote(skin, safe=""))
+        for skill in card.skills:
+            path = CACHE_DIR / "skill" / f"skill_icon_{skill.id}.png"
+            if skill.id and not path.is_file():
+                jobs[path] = SKILL_URL.format(quote(skill.id, safe=""))
+        for module in card.modules:
+            if module.type_icon and module.type_icon.lower() != "original" and not _uniequip_path(module.type_icon).is_file():
+                jobs[_uniequip_path(module.type_icon)] = UNIEQUIP_URL.format(quote(module.type_icon.lower(), safe=""))
+    return {path: url for path, url in jobs.items() if path not in _pending}
+
+
+async def _wait_for(jobs: dict[Path, str]) -> list[asyncio.Task]:
+    """下载这些图片，最多等 ENSURE_TIMEOUT；剩下的在后台完成。"""
+    gate = asyncio.Semaphore(6)
+
+    async def one(path: Path, url: str) -> bool:
+        async with gate:
+            return await _download(url, path)
+
+    tasks = [asyncio.ensure_future(one(p, u)) for p, u in jobs.items()]
+    for task in tasks:
+        _tasks.add(task)
+        task.add_done_callback(_tasks.discard)
+    _pending.update(jobs)
+    done, _ = await asyncio.wait(tasks, timeout=ENSURE_TIMEOUT)
+    logger.info(f"Skland Arknights assets: page waited for {sum(t.result() for t in done)}/{len(jobs)} missing pictures")
+    return tasks
+
+
+_original_render = render.render_operator_roster
+
+
+async def render_operator_roster(*, props, background_image):
+    jobs = _page_jobs(props)
+    if jobs:
+        await _wait_for(jobs)
+    return await _original_render(props=props, background_image=background_image)
+
+
+render.render_operator_roster = render_operator_roster
+box.render_operator_roster = render_operator_roster
+
+
+_avatar_retry: dict[Path, float] = {}
+
+
+def _gacha_jobs(props, begin: int | None, limit: int | None) -> dict[Path, str]:
+    """抽卡记录某一页里还没缓存的头像。"""
+    ids: set[str] = set()
+    for pool in props.pools[begin:limit]:
+        ids.update(pool.up_six_chars)
+        ids.update(pull.char_id for group in pool.records for pull in group.pulls)
+    now = time.monotonic()
+    jobs = {_avatar_path(char_id): AVATAR_URL.format(quote(char_id, safe="")) for char_id in ids}
+    return {path: url for path, url in jobs.items() if not path.is_file() and path not in _pending and _avatar_retry.get(path, 0) <= now}
+
+
+_original_gacha_render = render.render_gacha_history
+
+
+async def render_gacha_history(props, status, nickname, channel_master_id, begin=None, limit=None):
+    jobs = _gacha_jobs(props, begin, limit)
+    if jobs:
+        await _wait_for(jobs)
+        retry = time.monotonic() + AVATAR_RETRY
+        _avatar_retry.update((path, retry) for path in jobs if not path.is_file())
+    return await _original_gacha_render(props, status, nickname, channel_master_id, begin=begin, limit=limit)
+
+
+render.render_gacha_history = render_gacha_history
+gacha_command.render_gacha_history = render_gacha_history
+
+
+async def prefetch() -> None:
+    """整个图鉴里还没缓存的稀有度装饰、模组图标、默认立绘和头像。"""
+    jobs = {_deco_path(url): url for url in set(_DECO_SOURCES.values()) if not _deco_path(url).is_file()}
+    with_catalog = 0
+    try:
+        from nonebot_plugin_skland.data_source import gacha_table_data
+
+        catalog = gacha_table_data.operator_catalog
+        if not catalog.entries:
+            catalog = gacha_table_data.load_operator_catalog()
+        types = {m.type_icon.lower() for e in catalog.entries for m in e.modules if m.type_icon and m.type_icon.lower() != "original"}
+        for t in types:
+            if not _uniequip_path(t).is_file():
+                jobs[_uniequip_path(t)] = UNIEQUIP_URL.format(quote(t, safe=""))
+        with_catalog = len(types)
+        for e in catalog.entries:  # 默认立绘；只有 4 星及以上才有精英 2 的图
+            if not _avatar_path(e.char_id).is_file():
+                jobs[_avatar_path(e.char_id)] = AVATAR_URL.format(quote(e.char_id, safe=""))
+            elite2 = CACHE_DIR / "portrait" / f"{e.char_id}_2.png"
+            for n in (1, 2) if e.rarity >= 3 else (1,):
+                path = CACHE_DIR / "portrait" / f"{e.char_id}_{n}.png"
+                if n == 1 and elite2.is_file():  # 有些形态（阿米娅的）只有精英 2 的图
+                    continue
+                if not path.is_file():
+                    jobs[path] = PORTRAIT_URL.format(quote(f"{e.char_id}#{n}", safe=""))
+    except Exception as e:  # 之后图标会在页面需要时逐个下载
+        logger.warning(f"Skland Arknights assets: catalog unavailable ({type(e).__name__})")
+    gate = asyncio.Semaphore(4)
+
+    async def one(path: Path, url: str) -> bool:
+        async with gate:
+            return await _download(url, path)
+
+    got = sum(await asyncio.gather(*(one(p, u) for p, u in jobs.items()))) if jobs else 0
+    _point_deco_at_cache()
+    logger.info(f"Skland Arknights assets: {got}/{len(jobs)} fetched, {with_catalog} module types known, decorations local")
+
+
+@get_driver().on_startup
+async def _verify_and_prefetch() -> None:
+    for module in MODULES:
+        for name, replacement in REPLACEMENTS.items():
+            if hasattr(module, name) and getattr(module, name) is not replacement:
+                raise RuntimeError(f"Skland Arknights asset hook missing: {module.__name__}.{name}")
+    if render.render_operator_roster is not render_operator_roster or box.render_operator_roster is not render_operator_roster:
+        raise RuntimeError("Skland Arknights roster hook missing")
+    if render.render_gacha_history is not render_gacha_history or gacha_command.render_gacha_history is not render_gacha_history:
+        raise RuntimeError("Skland Arknights gacha hook missing")
+    task = asyncio.get_running_loop().create_task(prefetch())
+    _tasks.add(task)
+    task.add_done_callback(_tasks.discard)
+
+
+@scheduler.scheduled_job("interval", hours=PREFETCH_HOURS, id="skland_ark_assets_prefetch")
+async def _periodic_prefetch() -> None:
+    await prefetch()

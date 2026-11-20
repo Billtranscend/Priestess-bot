@@ -1,0 +1,95 @@
+"""新数据版本新增了什么，以及新生成的索引里哪些地方看起来不对。
+
+都是对 index.json 的纯函数，用于群里的更新通知和给超级用户的私聊提醒。
+"""
+
+from __future__ import annotations
+
+import re
+
+LIST_LIMIT = 12  # 群通知里每行最多列出的名字数
+
+
+def names(index: dict) -> dict[str, list[str]]:
+    """类别 -> 名字，按索引自身的顺序。"""
+    endgame = index.get("endgame") or {}
+    monuments = [
+        f'{series.get("name", "")}（{"、".join(group.get("name", "") for group in series.get("groups", []))}）'
+        for series in endgame.get("monument", [])
+    ]
+    return {
+        "干员": [op.get("name", "") for op in (index.get("operators") or {}).values()],
+        "武器": [weapon.get("name", "") for weapon in (index.get("weapons") or {}).values()],
+        "套装": [equip_set.get("name", "") for equip_set in (index.get("equip_sets") or {}).values() if not equip_set.get("loose")],
+        "战争回响": [group.get("name", "") for group in (endgame.get("tower") or {}).values()],
+        "影拓丰碑": monuments,
+    }
+
+
+def added(old: dict, new: dict) -> dict[str, list[str]]:
+    """新索引有而旧索引没有的名字。丰碑多了关卡就算新增，并列出它的全部关卡。"""
+    before, after = names(old), names(new)
+    return {kind: [name for name in after[kind] if name and name not in set(before.get(kind, ()))] for kind in after}
+
+
+def _joined(items: list[str]) -> str:
+    shown = "、".join(items[:LIST_LIMIT])
+    return shown if len(items) <= LIST_LIMIT else f"{shown} 等 {len(items)} 个"
+
+
+def notice_lines(new_names: dict[str, list[str]]) -> list[str]:
+    """群通知正文：每个有新内容的类别一行，最后说明怎么查。"""
+    lines = [f"新增{kind}：{_joined(items)}" for kind, items in new_names.items() if items]
+    examples = [f"/{new_names[kind][0]}" for kind in ("干员", "武器", "套装") if new_names.get(kind)]
+    if examples:
+        lines.append(f'现在就可以查：发送 /名称 查看资料卡，例如 {"、".join(examples)}')
+    stage = next((new_names[kind][0].split("（")[0] for kind in ("战争回响", "影拓丰碑") if new_names.get(kind)), "")
+    if stage:
+        lines.append(f"关卡发 /敌人 {stage} 看机制和敌人属性")
+    return lines
+
+
+def _plain(html: str) -> str:
+    return re.sub(r"<[^>]+>", "", html or "").strip()
+
+
+def goal_gaps(index: dict) -> list[str]:
+    """最高难度还没有增辉条件的战争回响关卡。"""
+    return [
+        group.get("name", "?")
+        for group in ((index.get("endgame") or {}).get("tower") or {}).values()
+        if any(stage.get("difficulty") == "残酷" and not stage.get("extra_goal") for stage in group.get("stages", []))
+    ]
+
+
+def problems(index: dict) -> list[str]:
+    """游戏数据用到了这段代码还不会读的东西的迹象：卡片上会出现空白或缺漏。"""
+    found: list[str] = []
+    for kind, minimum in (("operators", 1), ("weapons", 1), ("equip_sets", 1)):
+        if len(index.get(kind) or {}) < minimum:
+            found.append(f"索引里没有任何{ {'operators': '干员', 'weapons': '武器', 'equip_sets': '套装'}[kind] }")
+    found += [f"战争回响「{name}」读不到增辉条件" for name in goal_gaps(index)]
+    for op in (index.get("operators") or {}).values():
+        who = f'干员「{op.get("name", "?")}」'
+        if not op.get("skills"):
+            found.append(f"{who}没有任何技能")
+        for skill in op.get("skills", []):
+            texts = [skill.get("desc", "")] + [form.get("desc", "") for form in skill.get("forms", [])]
+            if not any(_plain(t) for t in texts):
+                found.append(f'{who}的{skill.get("type", "技能")}「{skill.get("name", "?")}」没有说明')
+            elif any("{" in _plain(t) or "?" in _plain(t) for t in texts):
+                found.append(f'{who}的{skill.get("type", "技能")}「{skill.get("name", "?")}」有没填上的数值')
+        for label, rows in (("天赋", op.get("talents", [])), ("潜能", op.get("potentials", []))):
+            for row in rows:
+                if not _plain(row.get("desc", "")):
+                    found.append(f'{who}的{label}「{row.get("name", "?")}」没有说明')
+                elif "{" in _plain(row["desc"]) or "?" in _plain(row["desc"]):
+                    found.append(f'{who}的{label}「{row.get("name", "?")}」有没填上的数值')
+    for weapon in (index.get("weapons") or {}).values():
+        for skill in weapon.get("skills", []):
+            levels = skill.get("levels", [])
+            if not levels or not all(_plain(level) for level in levels):
+                found.append(f'武器「{weapon.get("name", "?")}」的技能「{skill.get("name", "?")}」没有说明')
+            elif any("{" in _plain(level) or "?" in _plain(level) for level in levels):
+                found.append(f'武器「{weapon.get("name", "?")}」的技能「{skill.get("name", "?")}」有没填上的数值')
+    return list(dict.fromkeys(found))  # 两个管理员条目的文字相同，去重

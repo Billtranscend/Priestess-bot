@@ -1,0 +1,46 @@
+# NapCat 的 Docker 配置。复制成 compose.yaml 再改，步骤见 docs/deploy-napcat.md。
+#
+# - image：NapCat 已经停更，Docker Hub 上的官方镜像下不到了。镜像包从
+#   https://github.com/Billtranscend/NapCatQQ/releases 的 v4.18.42 下载，用 .sha256 校验，
+#   再 docker load -i 导入，把它打印出来的名字填在这里。arm64 包导入后就是下面这个名字。
+# - pull_policy: never：只用你导入的镜像，compose 不会去网上拉。
+# - platform：要和导入的包一致。arm64 包填 linux/arm64（我测的是这个），amd64 包填 linux/amd64。
+# - NAPCAT_UID / NAPCAT_GID：拥有这个目录、运行机器人的用户（id -u、id -g）。
+# - ACCOUNT：机器人的 QQ 号。填了以后容器重启会用 ./napcat/qq 里保存的登录态自动登录，不填每次都要扫码。
+# - WEBUI_TOKEN：WebUI 的登录口令。只在 napcat/config/webui.json 还不存在的那次启动用一次，之后再改不起作用。
+#   不填的话 NapCat 自己生成一个，在 docker compose logs napcat 里找。填了口令就别把 compose.yaml 发给别人。
+# - WebUI（6099 端口）默认监听所有地址，用主机网络时公网也能访问。第一次启动后把 napcat/config/webui.json
+#   里的 "host" 改成 "127.0.0.1"，再 docker compose restart napcat，之后通过 SSH 隧道访问。
+# - 主机网络让 NapCat 能连到 127.0.0.1:8080 上的 NoneBot，容器用的也是服务器自己的主机名和网卡地址，
+#   重建容器 QQ 不会掉登录。改用桥接网络的话，这两样每次重建都会变，QQ 会让你重新登录：
+#   那就在服务里固定 hostname: 和 mac_address:（而且容器里的 127.0.0.1 也不再是服务器本机）。
+# - pErithacus 的媒体目录在容器内外要用同一个绝对路径，因为机器人交给 NapCat 的是绝对路径。
+#   把 /opt/priestess-bot 换成你自己的目录。
+services:
+  napcat:
+    image: docker.m.daocloud.io/mlikiowa/napcat-docker:v4.18.42
+    pull_policy: never
+    platform: linux/arm64
+    container_name: napcat
+    network_mode: host
+    restart: unless-stopped
+    logging:  # NapCat 会把收到的每条消息都打进日志，限制一下大小
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "2"
+    environment:
+      NAPCAT_UID: "1000"
+      NAPCAT_GID: "1000"
+      # ACCOUNT: "123456789"
+      # WEBUI_TOKEN: change-me-to-a-long-random-string
+    volumes:
+      - ./napcat/qq:/app/.config/QQ
+      - ./napcat/config:/app/napcat/config
+      - ./napcat/plugins:/app/napcat/plugins
+      - type: bind
+        source: /opt/priestess-bot/data/nonebot_plugin_perithacus/media
+        target: /opt/priestess-bot/data/nonebot_plugin_perithacus/media
+        read_only: true
+        bind:
+          create_host_path: false

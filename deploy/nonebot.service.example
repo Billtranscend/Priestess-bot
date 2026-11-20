@@ -1,0 +1,35 @@
+# NoneBot 这边的 systemd 服务。把 /opt/priestess-bot 和用户、组换成你自己的，然后：
+#   sudo cp deploy/nonebot.service.example /etc/systemd/system/nonebot.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now nonebot
+#
+# User/Group 要用拥有 /opt/priestess-bot、并且执行过 .venv/bin/playwright install chromium 的那个用户
+# （docs/deploy-napcat.md 第 3 步）。浏览器装在这个用户的 ~/.cache/ms-playwright 下，换个用户跑就找不到它，
+# 启动时会报 Playwright environment is not set up correctly。想把浏览器放到别处，就带着 PLAYWRIGHT_BROWSERS_PATH
+# 安装，再把下面同样的那一行取消注释（手动启动时也要设）。
+[Unit]
+Description=NoneBot2 OneBot V11 Service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=bot
+Group=bot
+WorkingDirectory=/opt/priestess-bot
+Environment=PYTHONUNBUFFERED=1
+Environment=ENVIRONMENT=prod
+# nonebot-plugin-skland 用进程本地时间格式化日期，并且默认是北京时间
+Environment=TZ=Asia/Shanghai
+# Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/priestess-bot/data/nonebot_plugin_htmlrender
+ExecStart=/opt/priestess-bot/.venv/bin/python /opt/priestess-bot/bot.py
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/opt/priestess-bot
+
+[Install]
+WantedBy=multi-user.target
